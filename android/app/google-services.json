@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "719498473037",
+    "project_id": "basepharma-e22c9",
+    "storage_bucket": "basepharma-e22c9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:719498473037:android:cab54fd140718ea1703604",
+        "android_client_info": {
+          "package_name": "com.example.pharmacontrolv1"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "719498473037-2cpm53h0853s0lkf3fdtpfeopgis9ih1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.pharmacontrolv1",
+            "certificate_hash": "747d0bc49cb03fab02b5b52c497cd2d439771128"
+          }
+        },
+        {
+          "client_id": "719498473037-j3s8ao46nu0mbpte1aac09vekqdrple2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAj_n_f3Hz9o5nqeOooQ8or0SQpLIuMeL4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "719498473037-j3s8ao46nu0mbpte1aac09vekqdrple2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
