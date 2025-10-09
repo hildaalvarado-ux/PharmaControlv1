@@ -70,6 +70,8 @@ class MyApp extends StatelessWidget {
         '/login_empleado': (context) => const LoginEmpleadoPage(),
         '/register_vendedor': (context) => const RegisterVendedorPage(),
         '/dashboard': (context) => const DashboardPage(),
+        
+
       },
     );
   }
