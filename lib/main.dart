@@ -6,7 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'login_empleado.dart';
 import 'dashboard.dart';
 import 'app_theme.dart';
-import 'register_vendedor.dart'; // ahora usamos el theme compartido
+import 'register_vendedor.dart'; 
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,7 +29,7 @@ void main() async {
   runApp(const MyApp());
 }
 
-/// Paleta definida en app_theme.dart (ya no hace falta redefinir aquí)
+
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -70,8 +70,6 @@ class MyApp extends StatelessWidget {
         '/login_empleado': (context) => const LoginEmpleadoPage(),
         '/register_vendedor': (context) => const RegisterVendedorPage(),
         '/dashboard': (context) => const DashboardPage(),
-        
-
       },
     );
   }
@@ -83,7 +81,7 @@ class MyHomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // gradiente con tu paleta
+      
       body: Container(
         width: double.infinity,
         height: double.infinity,
@@ -93,37 +91,24 @@ class MyHomePage extends StatelessWidget {
         child: SafeArea(
           child: Column(
             children: [
-              // AppBar minimal
+              
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const SizedBox(width: 48), // placeholder
-                    Text(
-                      'PharmaControl',
-                      style: TextStyle(
-                        color: kGreen1,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
+                child: Center(
+                  child: Text(
+                    'PharmaControl',
+                    style: TextStyle(
+                      color: kGreen1,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
                     ),
-                    TextButton(
-                      onPressed: () => Navigator.pushNamed(context, '/login_empleado'),
-                      child: const Icon(Icons.person, color: Colors.white),
-                      style: TextButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        backgroundColor: kGreen2,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
 
               const Spacer(),
 
-              // Logo (usa tu asset)
+              
               Image.asset('assets/logo.png', height: 140, fit: BoxFit.contain),
 
               const SizedBox(height: 20),
@@ -143,9 +128,27 @@ class MyHomePage extends StatelessWidget {
 
               const SizedBox(height: 36),
 
+              
+              TextButton.icon(
+                onPressed: () => Navigator.pushNamed(context, '/login_empleado'),
+                icon: const Icon(Icons.person, color: Colors.white),
+                label: const Text(
+                  "Ingresar",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: kGreen2,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+
               const Spacer(flex: 2),
 
-              // Footer: derechos reservados + contactos
+              
               Container(
                 width: double.infinity,
                 color: kGreen1,
