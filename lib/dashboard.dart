@@ -1,12 +1,4 @@
 // lib/dashboard_cleaned.dart
-// Versión limpiada del Dashboard: menú por roles reducido a lo solicitado.
-// Cambios principales:
-// - Admin: accesos a Usuarios, Productos, Movimientos e Inventario.
-// - Farmacéutico: accesos a Productos (AdminProductManager) y Generar Venta (EgresoFormPage).
-// - Vendedor: acceso a Generar Venta (EgresoFormPage).
-// - Movimientos centralizados en MovementsManager (con sus pestañas internas).
-// - Eliminadas entradas/funciones no necesarias y comentarios redundantes.
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +7,7 @@ import 'admin_create_user.dart';
 import 'productos.dart'; // expone AdminProductManager
 import 'movements_manager.dart';
 import 'egreso_form.dart'; // expone EgresoFormPage
+import 'carrusel.dart'; // nuestro carrusel
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -29,7 +22,6 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _loading = true;
   DateTime? _loadedAt;
 
-  // Índice de la página interna (0 = resumen)
   int _selectedIndex = 0;
 
   @override
@@ -106,14 +98,12 @@ class _DashboardPageState extends State<DashboardPage> {
     });
   }
 
-  // Shortcuts to pages
   void _openUsuarios() => _selectPage(1);
   void _openProductos() => _selectPage(2);
   void _openMovimientos() => _selectPage(3);
   void _openInventario() => _selectPage(4);
   void _openGenerarVenta() => _selectPage(5);
 
-  // MENÚS POR ROL (solo lo solicitado)
   Widget _adminMenu() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,7 +149,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return const Text('Rol no definido o sin permisos.', style: TextStyle(color: Colors.red));
   }
 
-  // AppBar actions para pantallas grandes, según rol (resumido)
   List<Widget> _actionsForRole() {
     final role = _roleNorm();
     final List<Widget> actions = [];
@@ -224,7 +213,80 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // ---------- PÁGINAS INTERNAS ----------
-  Widget _pageHomeCardContent() => const SizedBox(height: 120);
+  Widget _pageHomeCardContent() {
+    final List<String> carouselImages = [
+      'assets/oferta1.png',
+      'assets/oferta2.png',
+      'assets/oferta3.png',
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Carrusel
+        CarouselWidget(images: carouselImages),
+        const SizedBox(height: 20),
+
+        // Productos próximos a vencer 
+      Center(
+        child: const Text(
+          'Ofertas (Próximos a vencer)',
+          style: TextStyle(fontSize: 27, fontWeight: FontWeight.bold),
+        ),
+      ),
+        
+        const SizedBox(height: 12),
+        StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance.collection('products').orderBy('expiryDate').snapshots(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) return const CircularProgressIndicator();
+            final products = snapshot.data!.docs.where((d) {
+              final expiry = (d['expiryDate'] as Timestamp?)?.toDate();
+              if (expiry == null) return false;
+              return expiry.isBefore(DateTime.now().add(const Duration(days: 90)));
+            }).take(4).toList();
+
+            return SizedBox(
+              height: 200,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: products.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 12),
+                itemBuilder: (context, index) {
+                  final data = products[index].data() as Map<String, dynamic>;
+                  return Card(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    child: SizedBox(
+                      width: 140,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          
+                          Text(
+                            data['name'] ?? 'Producto',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Vence: ${((data['expiryDate'] as Timestamp).toDate().day)}/'
+                            '${((data['expiryDate'] as Timestamp).toDate().month)}/'
+                            '${((data['expiryDate'] as Timestamp).toDate().year)}',
+                            style: const TextStyle(color: Colors.red, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
   Widget _pageUsuariosCardContent() => const AdminUserManager();
   Widget _pageProductosCardContent() => const AdminProductManager();
   Widget _pageMovimientosCardContent() => const MovementsManager();
