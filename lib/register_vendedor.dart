@@ -122,10 +122,10 @@ class _RegisterVendedorPageState extends State<RegisterVendedorPage> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Registrar', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kGreen1)),
+                        Text('Registro', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kGreen1)),
                         const SizedBox(height: 10),
-                        Image.asset('assets/logo.png', height: 90),
-                        const SizedBox(height: 40),
+                        Image.asset('assets/logo.png', height: 190),
+                        const SizedBox(height: 20),
 
                         TextFormField(
                           controller: _nameCtrl,
@@ -158,7 +158,7 @@ class _RegisterVendedorPageState extends State<RegisterVendedorPage> {
                           controller: _emailCtrl,
                           keyboardType: TextInputType.emailAddress,
                           decoration: InputDecoration(
-                            labelText: 'Correo electrónico (real)',
+                            labelText: 'Correo electrónico',
                             prefixIcon: const Icon(Icons.email_outlined),
                             filled: true,
                             fillColor: Colors.white,

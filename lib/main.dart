@@ -6,7 +6,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'login_empleado.dart';
 import 'dashboard.dart';
 import 'app_theme.dart';
-import 'register_vendedor.dart'; 
+import 'register_vendedor.dart';
+import 'ingreso_form.dart';
+import 'egreso_form.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -70,6 +72,8 @@ class MyApp extends StatelessWidget {
         '/login_empleado': (context) => const LoginEmpleadoPage(),
         '/register_vendedor': (context) => const RegisterVendedorPage(),
         '/dashboard': (context) => const DashboardPage(),
+        '/ingresos': (context) => const IngresoFormPage(),
+        '/egresos': (context) => const EgresoFormWidget(userRole: 'admin'),
       },
     );
   }
@@ -92,24 +96,11 @@ class MyHomePage extends StatelessWidget {
           child: Column(
             children: [
               
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
-                child: Center(
-                  child: Text(
-                    'PharmaControl',
-                    style: TextStyle(
-                      color: kGreen1,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
 
               const Spacer(),
 
               
-              Image.asset('assets/logo.png', height: 140, fit: BoxFit.contain),
+              Image.asset('assets/logo.png', height: 250, fit: BoxFit.contain),
 
               const SizedBox(height: 20),
 

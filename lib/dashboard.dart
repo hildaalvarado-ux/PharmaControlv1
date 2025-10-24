@@ -1,13 +1,13 @@
-// lib/dashboard_cleaned.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'admin_create_user.dart';
-import 'productos.dart'; // expone AdminProductManager
+import 'productos.dart';
 import 'movements_manager.dart';
-import 'egreso_form.dart'; // expone EgresoFormPage
-import 'carrusel.dart'; // nuestro carrusel
+import 'egreso_form.dart';
+import 'carrusel.dart';
+import 'proveedores.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -21,7 +21,6 @@ class _DashboardPageState extends State<DashboardPage> {
   String _name = '';
   bool _loading = true;
   DateTime? _loadedAt;
-
   int _selectedIndex = 0;
 
   @override
@@ -85,7 +84,10 @@ class _DashboardPageState extends State<DashboardPage> {
     return ListTile(
       leading: Icon(icon, color: kGreen1),
       title: Text(title),
-      onTap: onTap,
+      onTap: () {
+        Navigator.of(context).pop(); // cerrar menú móvil
+        if (onTap != null) onTap();
+      },
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       dense: true,
       visualDensity: const VisualDensity(vertical: -1),
@@ -93,6 +95,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   void _selectPage(int index) {
+    if (!mounted) return;
     setState(() {
       _selectedIndex = index;
     });
@@ -101,8 +104,9 @@ class _DashboardPageState extends State<DashboardPage> {
   void _openUsuarios() => _selectPage(1);
   void _openProductos() => _selectPage(2);
   void _openMovimientos() => _selectPage(3);
+  void _openEgresos() => _selectPage(5);
   void _openInventario() => _selectPage(4);
-  void _openGenerarVenta() => _selectPage(5);
+  void _openProveedores() => _selectPage(6);
 
   Widget _adminMenu() {
     return Column(
@@ -125,7 +129,7 @@ class _DashboardPageState extends State<DashboardPage> {
         const Text('Panel Farmacéutico', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         _buildMenuTile(icon: Icons.production_quantity_limits, title: 'Gestionar productos', onTap: _openProductos),
-        _buildMenuTile(icon: Icons.point_of_sale, title: 'Generar venta', onTap: _openGenerarVenta),
+        _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar Egreso (Factura)', onTap: _openEgresos),
       ],
     );
   }
@@ -136,7 +140,7 @@ class _DashboardPageState extends State<DashboardPage> {
       children: [
         const Text('Panel Vendedor', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
-        _buildMenuTile(icon: Icons.point_of_sale, title: 'Generar venta', onTap: _openGenerarVenta),
+        _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar Egreso (Factura)', onTap: _openEgresos),
       ],
     );
   }
@@ -159,34 +163,47 @@ class _DashboardPageState extends State<DashboardPage> {
         TextButton(onPressed: _openProductos, child: const Text("Productos", style: TextStyle(color: Colors.white))),
         TextButton(onPressed: _openMovimientos, child: const Text("Movimientos", style: TextStyle(color: Colors.white))),
         TextButton(onPressed: _openInventario, child: const Text("Inventario", style: TextStyle(color: Colors.white))),
+        TextButton(onPressed: _openProveedores, child: const Text("Proveedores", style: TextStyle(color: Colors.white))),
       ]);
     } else if (role == 'farmaceutico' || role == 'farmacéutico') {
       actions.addAll([
         TextButton(onPressed: _openProductos, child: const Text("Productos", style: TextStyle(color: Colors.white))),
-        TextButton(onPressed: _openGenerarVenta, child: const Text("Generar venta", style: TextStyle(color: Colors.white))),
+        TextButton(onPressed: _openEgresos, child: const Text("Registrar Egreso", style: TextStyle(color: Colors.white))),
       ]);
     } else if (role == 'vendedor') {
-      actions.add(TextButton(onPressed: _openGenerarVenta, child: const Text("Generar venta", style: TextStyle(color: Colors.white))));
+      actions.add(TextButton(onPressed: _openEgresos, child: const Text("Registrar Egreso", style: TextStyle(color: Colors.white))));
     }
 
+    actions.add(TextButton(onPressed: () => _selectPage(0), child: const Text("Sobre nosotros", style: TextStyle(color: Colors.white))));
     actions.add(IconButton(onPressed: _onSignOutPressed, icon: const Icon(Icons.logout, color: Colors.white)));
     return actions;
   }
 
-  Widget _buildDrawerContents() {
+  Widget _buildDrawerContents(bool isMobile) {
     return ListView(
       padding: EdgeInsets.zero,
       children: [
         DrawerHeader(
           decoration: BoxDecoration(color: kGreen1),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text('PharmaControl', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 6),
-              Text('Bienvenido, $_name', style: TextStyle(color: Colors.white70)),
+              const Text('PharmaControl',
+                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 40,
+                child: Image.asset(
+                  'assets/logo.png',
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, color: Colors.white, size: 36),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text('Bienvenido, $_name', style: const TextStyle(color: Colors.white70)),
               const SizedBox(height: 4),
-              Text('Rol: ${_role.isNotEmpty ? _role : '—'}', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
             ],
           ),
         ),
@@ -194,6 +211,8 @@ class _DashboardPageState extends State<DashboardPage> {
         const SizedBox(height: 12),
         const Divider(),
         _buildMenuTile(icon: Icons.help_outline, title: 'Sobre nosotros', onTap: () => _selectPage(0)),
+        if (_roleNorm() == 'admin')
+          _buildMenuTile(icon: Icons.local_shipping, title: 'Proveedores', onTap: _openProveedores),
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12.0),
@@ -212,86 +231,18 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  // ---------- PÁGINAS INTERNAS ----------
-  Widget _pageHomeCardContent() {
-    final List<String> carouselImages = [
-      'assets/oferta1.png',
-      'assets/oferta2.png',
-      'assets/oferta3.png',
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Carrusel
-        CarouselWidget(images: carouselImages),
-        const SizedBox(height: 20),
-
-        // Productos próximos a vencer 
-      Center(
-        child: const Text(
-          'Ofertas (Próximos a vencer)',
-          style: TextStyle(fontSize: 27, fontWeight: FontWeight.bold),
-        ),
-      ),
-        
-        const SizedBox(height: 12),
-        StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance.collection('products').orderBy('expiryDate').snapshots(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) return const CircularProgressIndicator();
-            final products = snapshot.data!.docs.where((d) {
-              final expiry = (d['expiryDate'] as Timestamp?)?.toDate();
-              if (expiry == null) return false;
-              return expiry.isBefore(DateTime.now().add(const Duration(days: 90)));
-            }).take(4).toList();
-
-            return SizedBox(
-              height: 200,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: products.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemBuilder: (context, index) {
-                  final data = products[index].data() as Map<String, dynamic>;
-                  return Card(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: SizedBox(
-                      width: 140,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          
-                          Text(
-                            data['name'] ?? 'Producto',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'Vence: ${((data['expiryDate'] as Timestamp).toDate().day)}/'
-                            '${((data['expiryDate'] as Timestamp).toDate().month)}/'
-                            '${((data['expiryDate'] as Timestamp).toDate().year)}',
-                            style: const TextStyle(color: Colors.red, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
+  Widget _pageHomeCardContent() => HomeCarousel();
   Widget _pageUsuariosCardContent() => const AdminUserManager();
   Widget _pageProductosCardContent() => const AdminProductManager();
   Widget _pageMovimientosCardContent() => const MovementsManager();
   Widget _pageInventarioCardContent() => Center(child: Text('Inventario (rol: ${_roleNorm()})'));
-  Widget _pageGenerarVentaCardContent() => const EgresoFormPage();
+
+  Widget _pageEgresosCardContent() {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: SingleChildScrollView(child: EgresoFormWidget(userRole: _roleNorm())),
+    );
+  }
 
   Widget _cardContentByIndex() {
     switch (_selectedIndex) {
@@ -304,9 +255,33 @@ class _DashboardPageState extends State<DashboardPage> {
       case 4:
         return _pageInventarioCardContent();
       case 5:
-        return _pageGenerarVentaCardContent();
+        return _pageEgresosCardContent();
+      case 6:
+        return ProvidersManager();
       default:
         return _pageHomeCardContent();
+    }
+  }
+
+  Widget _buildAppBarTitle(bool isMobile) {
+    if (isMobile) {
+      return const Text("PharmaControl", style: TextStyle(color: Colors.white));
+    } else {
+      return Row(
+        children: [
+          SizedBox(
+            height: 34,
+            child: Image.asset(
+              'assets/logo.png',
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) =>
+                  const Icon(Icons.inventory_2, color: Colors.white, size: 28),
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text("PharmaControl", style: TextStyle(color: Colors.white)),
+        ],
+      );
     }
   }
 
@@ -322,12 +297,10 @@ class _DashboardPageState extends State<DashboardPage> {
           backgroundColor: kGreen1,
           iconTheme: const IconThemeData(color: Colors.white),
           automaticallyImplyLeading: isMobile,
-          title: isMobile
-              ? const Text("PharmaControl", style: TextStyle(color: Colors.white))
-              : const Text("PharmaControl", style: TextStyle(color: Colors.white, fontSize: 18)),
-          actions: isMobile ? null : _actionsForRole(),
+          title: _buildAppBarTitle(isMobile),
+          actions: isMobile ? [] : _actionsForRole(),
         ),
-        drawer: isMobile ? Drawer(child: _buildDrawerContents()) : null,
+        drawer: isMobile ? Drawer(child: _buildDrawerContents(isMobile)) : null,
         body: Container(
           constraints: BoxConstraints(minHeight: screenHeight),
           decoration: const BoxDecoration(gradient: kBackgroundGradient),
@@ -337,46 +310,65 @@ class _DashboardPageState extends State<DashboardPage> {
                 ? const Center(child: CircularProgressIndicator())
                 : SingleChildScrollView(
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      crossAxisAlignment:
+                          isMobile ? CrossAxisAlignment.center : CrossAxisAlignment.start,
                       children: [
-                        Text('Bienvenido, $_name', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kGreen1)),
-                        const SizedBox(height: 8),
-                        Text('Rol: ${_role.isNotEmpty ? _role : '—'}', style: const TextStyle(fontSize: 14)),
+                        if (!isMobile)
+                          Row(
+                            children: [
+                              SizedBox(
+                                height: 34,
+                                child: Image.asset(
+                                  'assets/logo.png',
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, __, ___) =>
+                                      const Icon(Icons.inventory_2, color: Colors.green, size: 28),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Bienvenido, $_name',
+                                      style: TextStyle(
+                                          fontSize: 22,
+                                          fontWeight: FontWeight.bold,
+                                          color: kGreen1)),
+                                  const SizedBox(height: 4),
+                                  Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
+                                      style: const TextStyle(fontSize: 14)),
+                                ],
+                              ),
+                            ],
+                          )
+                        else ...[
+                          Text('Bienvenido, $_name',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  fontSize: 22, fontWeight: FontWeight.bold, color: kGreen1)),
+                          const SizedBox(height: 4),
+                          Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 14)),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            height: 40,
+                            child: Image.asset(
+                              'assets/logo.png',
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) =>
+                                  const Icon(Icons.inventory_2, color: Colors.green, size: 32),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 18),
-
                         Card(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape:
+                              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           elevation: 3,
                           child: Padding(
                             padding: const EdgeInsets.all(16),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    if (_selectedIndex == 0)
-                                      const SizedBox()
-                                    else
-                                      Text(_selectedIndexLabel(), style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: kGreen1)),
-
-                                    ElevatedButton(
-                                      onPressed: () => _selectPage(0),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: kGreen2,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                      ),
-                                      child: const Text('Ofertas'),
-                                    ),
-                                  ],
-                                ),
-
-                                const SizedBox(height: 12),
-                                Chip(label: Text(_selectedIndex == 0 ? '' : 'Ver: ${_selectedIndexLabel()}')),
-                                const SizedBox(height: 12),
-                                _cardContentByIndex(),
-                              ],
-                            ),
+                            child: _cardContentByIndex(),
                           ),
                         ),
                       ],
@@ -386,22 +378,5 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
       ),
     );
-  }
-
-  String _selectedIndexLabel() {
-    switch (_selectedIndex) {
-      case 1:
-        return 'Usuarios';
-      case 2:
-        return 'Productos';
-      case 3:
-        return 'Movimientos';
-      case 4:
-        return 'Inventario';
-      case 5:
-        return 'Generar venta';
-      default:
-        return 'Resumen';
-    }
   }
 }

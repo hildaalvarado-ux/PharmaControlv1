@@ -16,6 +16,38 @@ class _AdminProductManagerState extends State<AdminProductManager> {
 
   bool _loadingAction = false;
 
+  // Lista de categorias extraidas de los productos (únicas)
+  List<String> _categories = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final snap = await productsRef.get();
+      final Set<String> set = {};
+      for (final d in snap.docs) {
+        final data = d.data() as Map<String, dynamic>;
+        final cat = (data['category'] ?? '').toString().trim();
+        if (cat.isNotEmpty) set.add(cat);
+      }
+      final list = set.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      if (!mounted) return;
+      setState(() {
+        _categories = list;
+      });
+    } catch (e) {
+      // Si hay error, simplemente dejamos la lista vacía (no bloquear)
+      if (!mounted) return;
+      setState(() {
+        _categories = [];
+      });
+    }
+  }
+
   void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -62,7 +94,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
 
   // --- CRUD Firestore ---
   Future<void> _createProductFirestore(Map<String, dynamic> data) async {
-    // Construimos el mapa y añadimos expiryDate solo si existe y es DateTime
     final Map<String, dynamic> map = {
       'name': data['name'],
       'sku': data['sku'],
@@ -77,11 +108,9 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       'createdAt': FieldValue.serverTimestamp(),
     };
 
-    // --- expiry ---
     if (data.containsKey('expiryDate') && data['expiryDate'] is DateTime) {
       map['expiryDate'] = Timestamp.fromDate(data['expiryDate'] as DateTime);
     }
-    // ---
 
     await productsRef.add(map);
   }
@@ -101,19 +130,14 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
-    // --- expiry ---
-    // Si se pasa expiryDate como DateTime lo guardamos; si está explícitamente null,
-    // borramos el campo en Firestore (para permitir quitar una fecha). Si no se incluye la clave, no la tocamos.
     if (data.containsKey('expiryDate')) {
       final v = data['expiryDate'];
       if (v is DateTime) {
         map['expiryDate'] = Timestamp.fromDate(v);
       } else if (v == null) {
-        // Para borrar el campo expiryDate en Firestore:
         map['expiryDate'] = FieldValue.delete();
       }
     }
-    // ---
 
     await productsRef.doc(id).update(map);
   }
@@ -122,11 +146,48 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     await productsRef.doc(id).delete();
   }
 
+  // Mostrar diálogo para agregar nueva categoría (reutilizable)
+  Future<String?> _showAddCategoryDialog({String initial = ''}) async {
+    final TextEditingController newCatCtrl = TextEditingController(text: initial);
+    final res = await showDialog<String?>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Nueva categoría'),
+        content: TextField(
+          controller: newCatCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Nombre de la categoría'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(c).pop(null), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () {
+              final name = newCatCtrl.text.trim();
+              if (name.isNotEmpty) Navigator.of(c).pop(name);
+            },
+            child: const Text('Agregar'),
+          ),
+        ],
+      ),
+    );
+
+    if (res != null && res.trim().isNotEmpty) {
+      // Agregamos en memoria y reordenamos
+      if (!_categories.contains(res.trim())) {
+        setState(() {
+          _categories.add(res.trim());
+          _categories.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+        });
+      }
+      return res.trim();
+    }
+    return null;
+  }
+
   // --- Dialog: crear producto ---
   Future<void> _showCreateProductDialog() async {
     final _formKey = GlobalKey<FormState>();
     final nameCtrl = TextEditingController();
-    final categoryCtrl = TextEditingController();
     final descriptionCtrl = TextEditingController();
     final purchasePriceCtrl = TextEditingController(); // precio de compra
     final priceCtrl = TextEditingController(); // precio de venta (calculado o editable)
@@ -135,6 +196,9 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     bool manualPrice = false; // si true, el usuario editará price manualmente
     double marginPercent = 10.0;
     String? selectedProviderId;
+
+    // categoria: manejada con selectedCategory y no con TextEditingController
+    String? selectedCategory;
 
     // --- expiry ---
     DateTime? pickedExpiry;
@@ -168,8 +232,35 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                 // SKU es autogenerado, pero editable si quieres ajustar
                 TextFormField(controller: skuCtrl, decoration: const InputDecoration(labelText: 'SKU (id)'), validator: (v) => v == null || v.trim().isEmpty ? 'SKU requerido' : null),
                 const SizedBox(height: 8),
-                TextFormField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Categoría'), validator: (v) => v == null || v.trim().isEmpty ? 'Ingrese categoría' : null),
+
+                // --- Categoria: Dropdown + Boton Nueva categoria
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: selectedCategory,
+                        decoration: const InputDecoration(labelText: 'Categoría'),
+                        items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                        onChanged: (val) => setState(() => selectedCategory = val),
+                        validator: (val) => (val == null || val.trim().isEmpty) ? 'Seleccione o agregue una categoría' : null,
+                        isExpanded: true,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final added = await _showAddCategoryDialog();
+                        if (added != null) {
+                          setState(() => selectedCategory = added);
+                        }
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Nueva categoría'),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 8),
+
                 TextFormField(controller: descriptionCtrl, decoration: const InputDecoration(labelText: 'Descripción (uso, indicación, presentaciones)'), maxLines: 2),
                 const SizedBox(height: 8),
                 // --- picker expiry ---
@@ -233,7 +324,7 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(child: Text('Precio de venta sugerido = compra × (1 + margen)')),
+                  const Expanded(child: Text('Precio de venta sugerido = compra × (1 + margen)')),
                 ]),
                 const SizedBox(height: 8),
                 // Precio de venta (calculado por defecto, editable si manualPrice true)
@@ -282,7 +373,7 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Nota: Registrar un producto no crea una compra. Las compras se registran desde la sección Compras (Movimientos).',
+                  'Nota: Registrar un producto no crea una compra. Las compras se registran desde la sección Egresos',
                   style: TextStyle(fontSize: 12),
                 ),
               ]),
@@ -303,7 +394,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
 
     setState(() => _loadingAction = true);
     try {
-      // Si priceCtrl está vacío (por alguna razón) recalcular
       if (priceCtrl.text.trim().isEmpty) {
         final p = double.tryParse(purchasePriceCtrl.text.replaceAll(',', '.')) ?? 0.0;
         priceCtrl.text = (p * (1 + marginPercent / 100)).toStringAsFixed(2);
@@ -312,7 +402,7 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       await _createProductFirestore({
         'name': nameCtrl.text.trim(),
         'sku': skuCtrl.text.trim(),
-        'category': categoryCtrl.text.trim(),
+        'category': (selectedCategory ?? '').trim(),
         'description': descriptionCtrl.text.trim(),
         'purchasePrice': double.parse(purchasePriceCtrl.text.replaceAll(',', '.')),
         'price': double.parse(priceCtrl.text.replaceAll(',', '.')),
@@ -320,10 +410,12 @@ class _AdminProductManagerState extends State<AdminProductManager> {
         'priceIsPerUnit': priceIsPerUnit,
         'stock': int.parse(stockCtrl.text),
         'providerId': selectedProviderId,
-        // --- expiry ---
         if (pickedExpiry != null) 'expiryDate': pickedExpiry,
-        // ---
       });
+
+      // recargar categorias por si se agrego una nueva y quieres refrescar otras vistas
+      await _loadCategories();
+
       _showSnack('Producto creado.');
     } catch (e) {
       _showSnack('Error: $e');
@@ -338,7 +430,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     final _formKey = GlobalKey<FormState>();
     final nameCtrl = TextEditingController(text: data['name'] ?? '');
     final skuCtrl = TextEditingController(text: data['sku'] ?? '');
-    final categoryCtrl = TextEditingController(text: data['category'] ?? '');
     final descriptionCtrl = TextEditingController(text: data['description'] ?? '');
     final purchasePriceCtrl = TextEditingController(text: (data['purchasePrice'] ?? '').toString());
     final priceCtrl = TextEditingController(text: (data['price'] ?? '').toString());
@@ -348,7 +439,7 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     bool manualPrice = false;
     String? selectedProviderId = data['providerId'] as String?;
 
-    // --- expiry: leer valor si existe (puede venir como Timestamp)
+    // expiry
     DateTime? pickedExpiry;
     final rawExpiry = data['expiryDate'];
     if (rawExpiry != null) {
@@ -362,7 +453,10 @@ class _AdminProductManagerState extends State<AdminProductManager> {
         } catch (_) {}
       }
     }
-    // ---
+
+    // categoria inicial
+    String? selectedCategory = (data['category'] ?? '').toString().trim();
+    if (selectedCategory.isEmpty) selectedCategory = null;
 
     final providersSnap = await providersRef.orderBy('name').get();
     final providers = providersSnap.docs;
@@ -386,8 +480,35 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                 const SizedBox(height: 8),
                 TextFormField(controller: skuCtrl, decoration: const InputDecoration(labelText: 'SKU (id)'), validator: (v) => v == null || v.trim().isEmpty ? 'SKU requerido' : null),
                 const SizedBox(height: 8),
-                TextFormField(controller: categoryCtrl, decoration: const InputDecoration(labelText: 'Categoría'), validator: (v) => v == null || v.trim().isEmpty ? 'Ingrese categoría' : null),
+
+                // --- Categoria: Dropdown + Boton Nueva categoria
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: selectedCategory,
+                        decoration: const InputDecoration(labelText: 'Categoría'),
+                        items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                        onChanged: (val) => setState(() => selectedCategory = val),
+                        validator: (val) => (val == null || val.trim().isEmpty) ? 'Seleccione o agregue una categoría' : null,
+                        isExpanded: true,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final added = await _showAddCategoryDialog(initial: selectedCategory ?? '');
+                        if (added != null) {
+                          setState(() => selectedCategory = added);
+                        }
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('Nueva categoría'),
+                    ),
+                  ],
+                ),
                 const SizedBox(height: 8),
+
                 TextFormField(controller: descriptionCtrl, decoration: const InputDecoration(labelText: 'Descripción (uso, indicación, presentaciones)'), maxLines: 2),
                 const SizedBox(height: 8),
                 // --- expiry picker (editar)
@@ -449,7 +570,7 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(child: Text('Precio de venta sugerido = compra × (1 + margen)')),
+                  const Expanded(child: Text('Precio de venta sugerido = compra × (1 + margen)')),
                 ]),
                 const SizedBox(height: 8),
                 Row(
@@ -516,7 +637,7 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       await _updateProductFirestore(doc.id, {
         'name': nameCtrl.text.trim(),
         'sku': skuCtrl.text.trim(),
-        'category': categoryCtrl.text.trim(),
+        'category': (selectedCategory ?? '').trim(),
         'description': descriptionCtrl.text.trim(),
         'purchasePrice': double.parse(purchasePriceCtrl.text.replaceAll(',', '.')),
         'price': double.parse(priceCtrl.text.replaceAll(',', '.')),
@@ -524,10 +645,12 @@ class _AdminProductManagerState extends State<AdminProductManager> {
         'priceIsPerUnit': priceIsPerUnit,
         'stock': int.parse(stockCtrl.text),
         'providerId': selectedProviderId,
-        // --- expiry: si pickedExpiry es null y quieres mantener la fecha tal como está,
-        // no incluyas la clave. Si quieres eliminar la fecha, incluye 'expiryDate': null.
-        'expiryDate': pickedExpiry, // si null => removerá el campo (según lógica en update)
+        'expiryDate': pickedExpiry,
       });
+
+      // recargar categorias (por si se agrego una nueva)
+      await _loadCategories();
+
       _showSnack('Producto actualizado.');
     } catch (e) {
       _showSnack('Error: $e');
@@ -585,8 +708,8 @@ class _AdminProductManagerState extends State<AdminProductManager> {
             ElevatedButton.icon(
               onPressed: _showCreateProductDialog,
               icon: const Icon(Icons.add_box),
-              label: const Text('Nuevo producto', style: TextStyle(color: Colors.white)),
-              style: ElevatedButton.styleFrom(backgroundColor: kGreen2),
+              label: const Text('Nuevo producto'),
+              style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
             ),
           ],
         ),

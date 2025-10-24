@@ -7,14 +7,25 @@
 // - Al guardar, incrementa el stock de cada producto con una transacción en Firestore
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
+import 'egreso_form.dart'; // Importar para usar EgresoFormWidget
 
 class IngresoFormPage extends StatefulWidget {
   const IngresoFormPage({super.key});
 
   @override
   State<IngresoFormPage> createState() => _IngresoFormPageState();
+}
+
+class IngresoFormWidget extends StatelessWidget {
+  const IngresoFormWidget({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const IngresoFormPage();
+  }
 }
 
 class IngresoLine {
@@ -229,6 +240,7 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
             }).toList();
 
         tx.set(docRef, {
+          'userId': FirebaseAuth.instance.currentUser?.uid,
           'items': itemsForDb,
           'total': total,
           'providerId': providerCtrl.text.trim().isEmpty ? providerId : providerCtrl.text.trim(),
@@ -484,7 +496,7 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
                         Row(mainAxisAlignment: MainAxisAlignment.end, children: [
                           Text('Total: ${total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                           const SizedBox(width: 12),
-                          ElevatedButton(onPressed: _loading ? null : _save, style: ElevatedButton.styleFrom(backgroundColor: kGreen2), child: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator()) : const Text('Registrar compra'))
+                          ElevatedButton(onPressed: _loading ? null : _save, style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white), child: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Registrar compra'))
                         ])
                       ]),
                     ),

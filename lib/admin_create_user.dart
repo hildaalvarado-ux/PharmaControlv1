@@ -299,8 +299,8 @@ class _AdminUserManagerState extends State<AdminUserManager> {
             ElevatedButton.icon(
               onPressed: _showCreateUserDialog,
               icon: const Icon(Icons.person_add),
-              label: const Text('Nuevo usuario', style: TextStyle(color: Colors.white)),
-              style: ElevatedButton.styleFrom(backgroundColor: kGreen2),
+              label: const Text('Nuevo usuario'),
+              style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
             ),
           ],
         ),

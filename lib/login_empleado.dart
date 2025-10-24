@@ -170,7 +170,7 @@ class _LoginEmpleadoPageState extends State<LoginEmpleadoPage> {
                     children: [
                       Text('Iniciar Sesión', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kGreen1)),
                       const SizedBox(height: 10),
-                      Image.asset('assets/logo.png', height: 70),
+                      Image.asset('assets/logo.png', height: 190),
                       const SizedBox(height: 20),
 
                       TextField(

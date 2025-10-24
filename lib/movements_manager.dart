@@ -3,6 +3,18 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
 
+class MovementItem {
+  final String type;
+  final Map<String, dynamic> data;
+  final DateTime date;
+  final String? productId;
+  final int qty;
+  final double total;
+  final String? party;
+  final String id;
+
+  MovementItem(this.type, this.data, this.date, this.productId, this.qty, this.total, this.party, this.id);
+}
 
 class MovementsManager extends StatefulWidget {
   /// initialTab: 'ingresos' o 'egresos' (opcional)
@@ -265,8 +277,6 @@ class _MovementsManagerState extends State<MovementsManager> {
       q = q.where('productId', isEqualTo: _filterProductId);
     }
     if ((_from != null) || (_to != null)) {
-      // Firestore doesn't allow combining inequalities on different fields easily;
-      // we'll filter by createdAt range when both provided.
       if (_from != null && _to != null) {
         q = q.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_from!));
         q = q.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(_to!.add(const Duration(days:1))));
@@ -277,7 +287,6 @@ class _MovementsManagerState extends State<MovementsManager> {
       }
     }
     if (_searchCtrl.text.trim().isNotEmpty) {
-      // Firestore does not support contains on arbitrary fields; we'll filter by reference equality if used
       final s = _searchCtrl.text.trim();
       q = q.where('reference', isEqualTo: s);
     }
@@ -288,7 +297,6 @@ class _MovementsManagerState extends State<MovementsManager> {
     return Column(
       children: [
         Row(children: [
-          
           const SizedBox(width: 12),
           Expanded(
             child: TextField(
@@ -334,9 +342,6 @@ class _MovementsManagerState extends State<MovementsManager> {
             return Row(children: [
               const Text('Producto:'),
               const SizedBox(width: 8),
-              // Asegúrate que la variable _filterProductId esté declarada como:
-// String? _filterProductId;
-
 DropdownButton<String?>(
   value: _filterProductId,
   hint: const Text('Todos'),
@@ -349,7 +354,6 @@ DropdownButton<String?>(
   }).toList(),
   onChanged: (String? v) => setState(() => _filterProductId = v),
 ),
-
               const SizedBox(width: 12),
               Expanded(child: Container()),
               ElevatedButton.icon(
@@ -391,10 +395,10 @@ DropdownButton<String?>(
             final party = _activeTab == 'ingresos' ? (data['providerId'] ?? '—') : (data['customer'] ?? data['party'] ?? '—');
 
             return FutureBuilder<DocumentSnapshot>(
-              future: productsRef.doc(productId).get(),
+              future: productId != null && productId.toString().isNotEmpty ? productsRef.doc(productId).get() : Future.value(null),
               builder: (context, prodSnap) {
                 String prodLabel = productId;
-                if (prodSnap.hasData && prodSnap.data!.exists) {
+                if (prodSnap.hasData && prodSnap.data != null && prodSnap.data!.exists) {
                   final pd = prodSnap.data!.data() as Map<String, dynamic>;
                   prodLabel = '${pd['name'] ?? '—'} (${pd['sku'] ?? '—'})';
                 }
@@ -429,9 +433,8 @@ DropdownButton<String?>(
                                 Text('Notas: ${data['notes'] ?? ''}'),
                                 Text('Fecha: ${date?.toString() ?? '—'}'),
                               ],
-                            )),
-                            actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cerrar'))],
-                          ));
+                            ))),
+                          );
                         } else if (action == 'delete') {
                           final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
                             title: const Text('Confirmar eliminación'),
@@ -466,34 +469,138 @@ DropdownButton<String?>(
     );
   }
 
+  Widget _buildInitialTable() {
+    return StreamBuilder<List<MovementItem>>(
+      stream: _getAllMovementsStream(),
+      builder: (context, snap) {
+        if (snap.hasError) return const Text('Error al cargar movimientos');
+        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+        final movements = snap.data!;
+        if (movements.isEmpty) {
+          return const Center(
+            child: Text('Aún no existen movimientos registrados.', style: TextStyle(fontSize: 16, color: Colors.grey)),
+          );
+        }
+
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: DataTable(
+            columns: const [
+              DataColumn(label: Text('Tipo')),
+              DataColumn(label: Text('Producto')),
+              DataColumn(label: Text('Cantidad')),
+              DataColumn(label: Text('Precio Unitario')),
+              DataColumn(label: Text('Total')),
+              DataColumn(label: Text('Parte')),
+              DataColumn(label: Text('Fecha')),
+            ],
+            rows: movements.map((m) {
+              return DataRow(cells: [
+                DataCell(Text(m.type == 'ingreso' ? 'Ingreso' : 'Egreso')),
+                DataCell(FutureBuilder<DocumentSnapshot>(
+                  future: m.productId != null && m.productId!.isNotEmpty ? productsRef.doc(m.productId).get() : Future.value(null),
+                  builder: (context, prodSnap) {
+                    String prodLabel = m.productId ?? '—';
+                    if (prodSnap.hasData && prodSnap.data != null && prodSnap.data!.exists) {
+                      final pd = prodSnap.data!.data() as Map<String, dynamic>;
+                      prodLabel = '${pd['name'] ?? '—'} (${pd['sku'] ?? '—'})';
+                    }
+                    return Text(prodLabel);
+                  },
+                )),
+                DataCell(Text(m.qty.toString())),
+                DataCell(Text(m.data['unitPrice']?.toString() ?? '—')),
+                DataCell(Text(m.total.toStringAsFixed(2))),
+                DataCell(Text(m.party ?? '—')),
+                DataCell(Text('${m.date.day}/${m.date.month}/${m.date.year}')),
+              ]);
+            }).toList(),
+          ),
+        );
+      },
+    );
+  }
+
+  Stream<List<MovementItem>> _getAllMovementsStream() {
+    final ingresosStream = ingresosRef.orderBy('createdAt', descending: true).snapshots();
+    final egresosStream = egresosRef.orderBy('createdAt', descending: true).snapshots();
+
+    // Usamos Future.wait para obtener los primeros snapshots de ambas colecciones,
+    // y luego lo convertimos a Stream con Stream.fromFuture. Esto devuelve un Stream
+    // de un único evento con la lista de QuerySnapshot (lo que esperábamos originalmente).
+    return Stream.fromFuture(Future.wait([ingresosStream.first, egresosStream.first]))
+        .asyncMap((snapshotsList) {
+      final ingresosSnap = snapshotsList[0] as QuerySnapshot;
+      final egresosSnap = snapshotsList[1] as QuerySnapshot;
+
+      final movements = <MovementItem>[];
+
+      for (var doc in ingresosSnap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final date = data['createdAt'] is Timestamp ? (data['createdAt'] as Timestamp).toDate() : DateTime.now();
+        final qty = data['qty'] ?? 0;
+        final total = (data['subtotal'] ?? 0.0).toDouble();
+        final party = data['providerId'] ?? '—';
+        movements.add(MovementItem('ingreso', data, date, data['productId'], qty, total, party, doc.id));
+      }
+
+      for (var doc in egresosSnap.docs) {
+        final data = doc.data() as Map<String, dynamic>;
+        final date = data['createdAt'] is Timestamp ? (data['createdAt'] as Timestamp).toDate() : DateTime.now();
+        final qty = data['qty'] ?? 0;
+        final total = (data['subtotal'] ?? 0.0).toDouble();
+        final party = data['customer'] ?? '—';
+        movements.add(MovementItem('egreso', data, date, data['productId'], qty, total, party, doc.id));
+      }
+
+      movements.sort((a, b) => b.date.compareTo(a.date));
+      return movements;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Header con tabs
+        // Header con botones principales
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Text('Movimientos', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kGreen1)),
             Row(children: [
-              ChoiceChip(
-                label: const Text('Ingresos'),
-                selected: _activeTab == 'ingresos',
-                onSelected: (s) => setState(() => _activeTab = 'ingresos'),
+              ElevatedButton(
+                onPressed: () => Navigator.pushNamed(context, '/ingresos'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kGreen2,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Ingresos'),
               ),
               const SizedBox(width: 8),
-              ChoiceChip(
-                label: const Text('Egresos'),
-                selected: _activeTab == 'egresos',
-                onSelected: (s) => setState(() => _activeTab = 'egresos'),
+              ElevatedButton(
+                onPressed: () => Navigator.pushNamed(context, '/egresos'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: kGreen2,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Egresos'),
               ),
             ]),
           ],
         ),
         const SizedBox(height: 12),
-        _buildFiltersBar(),
+        // Tabla inicial con todos los registros
+        _buildInitialTable(),
         const SizedBox(height: 12),
-        _buildList(),
+        // Filtros y lista filtrada (opcional, para vista detallada)
+        ExpansionTile(
+          title: const Text('Vista Detallada con Filtros'),
+          children: [
+            _buildFiltersBar(),
+            const SizedBox(height: 12),
+            _buildList(),
+          ],
+        ),
         if (_loadingAction) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
       ],
     );
