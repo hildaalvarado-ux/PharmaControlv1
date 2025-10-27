@@ -8,6 +8,7 @@ import 'movements_manager.dart';
 import 'egreso_form.dart';
 import 'carrusel.dart';
 import 'proveedores.dart';
+import 'sobre_nosotros.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -259,7 +260,7 @@ class _DashboardPageState extends State<DashboardPage> {
       case 6:
         return ProvidersManager();
       default:
-        return _pageHomeCardContent();
+        return const SobreNosotrosPage();
     }
   }
 
