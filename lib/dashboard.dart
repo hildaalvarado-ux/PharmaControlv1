@@ -192,11 +192,11 @@ class _DashboardPageState extends State<DashboardPage> {
                   style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               SizedBox(
-                height: 40,
+                height: 60,
                 child: Image.asset(
                   'assets/logo.png',
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, color: Colors.white, size: 36),
+                  errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, color: Colors.white, size:90),
                 ),
               ),
               const SizedBox(height: 8),
