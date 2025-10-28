@@ -1,608 +1,581 @@
 // lib/movements_manager.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'app_theme.dart';
 
-class MovementItem {
-  final String type;
-  final Map<String, dynamic> data;
-  final DateTime date;
-  final String? productId;
-  final int qty;
-  final double total;
-  final String? party;
-  final String id;
-
-  MovementItem(this.type, this.data, this.date, this.productId, this.qty, this.total, this.party, this.id);
-}
+/// Colección principal usada por tu app para productos
+/// ya existe como 'products'. Aquí agregamos 'movements'.
+///
+/// Estructura sugerida de un documento en 'movements':
+/// {
+///   type: 'ingreso' | 'egreso',
+///   createdAt: Timestamp,
+///   createdByUid: String,
+///   createdByName: String,
+///   note: String?,
+///   counterpartyType: 'cliente' | 'proveedor' | null,
+///   counterpartyName: String?,
+///   totalItems: int,
+///   totalAmount: double,
+///   items: [
+///     {
+///       productId: String,
+///       productName: String,
+///       sku: String,
+///       qty: int,
+///       unitPrice: double, // precio al momento del movimiento
+///       subtotal: double,
+///       stockBefore: int,
+///       stockAfter: int
+///     }, ...
+///   ]
+/// }
 
 class MovementsManager extends StatefulWidget {
-  /// initialTab: 'ingresos' o 'egresos' (opcional)
-  final String initialTab;
-  const MovementsManager({super.key, this.initialTab = 'ingresos'});
+  const MovementsManager({super.key});
 
   @override
   State<MovementsManager> createState() => _MovementsManagerState();
 }
 
+enum _View { all, ingresos, egresos }
+
 class _MovementsManagerState extends State<MovementsManager> {
-  final CollectionReference productsRef = FirebaseFirestore.instance.collection('products');
-  final CollectionReference providersRef = FirebaseFirestore.instance.collection('providers');
-  final CollectionReference ingresosRef = FirebaseFirestore.instance.collection('ingresos');
-  final CollectionReference egresosRef = FirebaseFirestore.instance.collection('egresos');
+  final _movementsRef = FirebaseFirestore.instance.collection('movements');
+  final _productsRef = FirebaseFirestore.instance.collection('products');
 
-  String _activeTab = 'ingresos';
-  bool _loadingAction = false;
+  _View _view = _View.all;
+  bool _busy = false;
 
-  // Filters
+  // Filtro rápido por rango de fechas (opcional)
   DateTime? _from;
   DateTime? _to;
-  String? _filterProductId;
-  final TextEditingController _searchCtrl = TextEditingController();
 
-  @override
-  void initState() {
-    super.initState();
-    _activeTab = widget.initialTab == 'egresos' ? 'egresos' : 'ingresos';
-  }
-
-  void _showSnack(String msg) {
+  void _snack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  // --- Create ingreso (compra / entrada) ---
-  Future<void> _showCreateIngresoDialog() async {
-    final productsSnap = await productsRef.orderBy('name').get();
-    final providersSnap = await providersRef.orderBy('name').get();
-    if (productsSnap.docs.isEmpty) {
-      _showSnack('No hay productos. Registra productos antes de crear ingresos.');
-      return;
+  Query _buildQuery() {
+    Query q = _movementsRef.orderBy('createdAt', descending: true);
+    switch (_view) {
+      case _View.ingresos:
+        q = q.where('type', isEqualTo: 'ingreso');
+        break;
+      case _View.egresos:
+        q = q.where('type', isEqualTo: 'egreso');
+        break;
+      case _View.all:
+        break;
     }
-    if (providersSnap.docs.isEmpty) {
-      _showSnack('No hay proveedores. Registra proveedores antes de crear ingresos.');
-      return;
+    if (_from != null) {
+      q = q.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_from!));
     }
-
-    String selectedProductId = productsSnap.docs.first.id;
-    String selectedProviderId = providersSnap.docs.first.id;
-    final qtyCtrl = TextEditingController(text: '1');
-    final unitPriceCtrl = TextEditingController(text: '0.00');
-    final refCtrl = TextEditingController();
-    final notesCtrl = TextEditingController();
-
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(builder: (context, setState) {
-        final productName = (productsSnap.docs.firstWhere((d) => d.id == selectedProductId).data() as Map)['name'] ?? '';
-        return AlertDialog(
-          title: const Text('Nuevo Ingreso (Compra / Entrada)'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              DropdownButtonFormField<String>(
-                value: selectedProviderId,
-                items: providersSnap.docs.map((p) {
-                  final d = p.data() as Map<String, dynamic>;
-                  return DropdownMenuItem(value: p.id, child: Text(d['name'] ?? '—'));
-                }).toList(),
-                onChanged: (v) => setState(() => selectedProviderId = v!),
-                decoration: const InputDecoration(labelText: 'Proveedor'),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: selectedProductId,
-                items: productsSnap.docs.map((p) {
-                  final d = p.data() as Map<String, dynamic>;
-                  return DropdownMenuItem(value: p.id, child: Text('${d['name'] ?? '—'} (${d['sku'] ?? '—'})'));
-                }).toList(),
-                onChanged: (v) => setState(() => selectedProductId = v!),
-                decoration: const InputDecoration(labelText: 'Producto'),
-              ),
-              const SizedBox(height: 8),
-              TextField(controller: qtyCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Cantidad')),
-              const SizedBox(height: 8),
-              TextField(controller: unitPriceCtrl, keyboardType: TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Precio unitario')),
-              const SizedBox(height: 8),
-              TextField(controller: refCtrl, decoration: const InputDecoration(labelText: 'Referencia (opcional)')),
-              const SizedBox(height: 8),
-              TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Notas (opcional)')),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-            TextButton(onPressed: () {
-              final qty = int.tryParse(qtyCtrl.text) ?? 0;
-              final p = double.tryParse(unitPriceCtrl.text.replaceAll(',', '.')) ?? -1;
-              if (qty <= 0) {
-                _showSnack('Cantidad inválida');
-                return;
-              }
-              if (p < 0) {
-                _showSnack('Precio unitario inválido');
-                return;
-              }
-              Navigator.pop(c, true);
-            }, child: const Text('Guardar')),
-          ],
-        );
-      }),
-    );
-
-    if (saved != true) return;
-
-    // perform save
-    setState(() => _loadingAction = true);
-    try {
-      final qty = int.tryParse(qtyCtrl.text) ?? 0;
-      final unitPrice = double.parse(unitPriceCtrl.text.replaceAll(',', '.'));
-      final subtotal = qty * unitPrice;
-
-      final batch = FirebaseFirestore.instance.batch();
-      final doc = ingresosRef.doc();
-      batch.set(doc, {
-        'providerId': selectedProviderId,
-        'productId': selectedProductId,
-        'qty': qty,
-        'unitPrice': unitPrice,
-        'subtotal': subtotal,
-        'reference': refCtrl.text.trim(),
-        'notes': notesCtrl.text.trim(),
-        'createdAt': FieldValue.serverTimestamp(),
-        'userId': null,
-      });
-
-      // incrementar stock
-      final prodRef = productsRef.doc(selectedProductId);
-      batch.update(prodRef, {'stock': FieldValue.increment(qty)});
-
-      await batch.commit();
-      _showSnack('Ingreso registrado y stock actualizado.');
-      if (mounted) setState(() {});
-    } catch (e) {
-      _showSnack('Error al registrar ingreso: $e');
-    } finally {
-      setState(() => _loadingAction = false);
-    }
-  }
-
-  // --- Create egreso (venta / salida) ---
-  Future<void> _showCreateEgresoDialog() async {
-    final productsSnap = await productsRef.orderBy('name').get();
-    if (productsSnap.docs.isEmpty) {
-      _showSnack('No hay productos. Registra productos antes de crear egresos.');
-      return;
-    }
-
-    String selectedProductId = productsSnap.docs.first.id;
-    final qtyCtrl = TextEditingController(text: '1');
-    final unitPriceCtrl = TextEditingController(text: '0.00'); // precio de venta
-    final customerCtrl = TextEditingController();
-    final refCtrl = TextEditingController();
-    final notesCtrl = TextEditingController();
-
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(builder: (context, setState) {
-        return AlertDialog(
-          title: const Text('Nuevo Egreso (Venta / Salida)'),
-          content: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              DropdownButtonFormField<String>(
-                value: selectedProductId,
-                items: productsSnap.docs.map((p) {
-                  final d = p.data() as Map<String, dynamic>;
-                  return DropdownMenuItem(value: p.id, child: Text('${d['name'] ?? '—'} (${d['sku'] ?? '—'}) • Stock: ${d['stock'] ?? 0}'));
-                }).toList(),
-                onChanged: (v) => setState(() => selectedProductId = v!),
-                decoration: const InputDecoration(labelText: 'Producto'),
-              ),
-              const SizedBox(height: 8),
-              TextField(controller: qtyCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Cantidad')),
-              const SizedBox(height: 8),
-              TextField(controller: unitPriceCtrl, keyboardType: TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Precio unitario (venta)')),
-              const SizedBox(height: 8),
-              TextField(controller: customerCtrl, decoration: const InputDecoration(labelText: 'Cliente (opcional)')),
-              const SizedBox(height: 8),
-              TextField(controller: refCtrl, decoration: const InputDecoration(labelText: 'Referencia (opcional)')),
-              const SizedBox(height: 8),
-              TextField(controller: notesCtrl, decoration: const InputDecoration(labelText: 'Notas (opcional)')),
-            ]),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-            TextButton(onPressed: () {
-              final qty = int.tryParse(qtyCtrl.text) ?? 0;
-              final p = double.tryParse(unitPriceCtrl.text.replaceAll(',', '.')) ?? -1;
-              if (qty <= 0) {
-                _showSnack('Cantidad inválida');
-                return;
-              }
-              if (p < 0) {
-                _showSnack('Precio unitario inválido');
-                return;
-              }
-              Navigator.pop(c, true);
-            }, child: const Text('Guardar')),
-          ],
-        );
-      }),
-    );
-
-    if (saved != true) return;
-
-    // perform save with transaction to avoid negative stock
-    setState(() => _loadingAction = true);
-    try {
-      final qty = int.tryParse(qtyCtrl.text) ?? 0;
-      final unitPrice = double.parse(unitPriceCtrl.text.replaceAll(',', '.'));
-      final subtotal = qty * unitPrice;
-
-      final docRef = egresosRef.doc();
-
-      await FirebaseFirestore.instance.runTransaction((tx) async {
-        final prodRef = productsRef.doc(selectedProductId);
-        final prodSnap = await tx.get(prodRef);
-        if (!prodSnap.exists) throw Exception('Producto no encontrado');
-        final currentStock = (prodSnap.data() as Map<String, dynamic>)['stock'] ?? 0;
-        final curr = (currentStock is int) ? currentStock : int.tryParse(currentStock.toString()) ?? 0;
-        if (curr < qty) throw Exception('Stock insuficiente (${curr}) para realizar la venta.');
-
-        tx.set(docRef, {
-          'productId': selectedProductId,
-          'qty': qty,
-          'unitPrice': unitPrice,
-          'subtotal': subtotal,
-          'customer': customerCtrl.text.trim(),
-          'reference': refCtrl.text.trim(),
-          'notes': notesCtrl.text.trim(),
-          'createdAt': FieldValue.serverTimestamp(),
-          'userId': null,
-        });
-        tx.update(prodRef, {'stock': FieldValue.increment(-qty)});
-      });
-
-      _showSnack('Egreso registrado y stock actualizado.');
-    } catch (e) {
-      _showSnack('Error al registrar egreso: ${e.toString()}');
-    } finally {
-      setState(() => _loadingAction = false);
-    }
-  }
-
-  // --- Build query stream for the active tab with filters ---
-  Query _buildQueryForActiveTab() {
-    final col = _activeTab == 'ingresos' ? ingresosRef : egresosRef;
-    Query q = col.orderBy('createdAt', descending: true);
-    if (_filterProductId != null && _filterProductId!.isNotEmpty) {
-      q = q.where('productId', isEqualTo: _filterProductId);
-    }
-    if ((_from != null) || (_to != null)) {
-      if (_from != null && _to != null) {
-        q = q.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_from!));
-        q = q.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(_to!.add(const Duration(days:1))));
-      } else if (_from != null) {
-        q = q.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_from!));
-      } else if (_to != null) {
-        q = q.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(_to!.add(const Duration(days:1))));
-      }
-    }
-    if (_searchCtrl.text.trim().isNotEmpty) {
-      final s = _searchCtrl.text.trim();
-      q = q.where('reference', isEqualTo: s);
+    if (_to != null) {
+      // incluir todo el día de _to
+      final toEnd = DateTime(_to!.year, _to!.month, _to!.day, 23, 59, 59, 999);
+      q = q.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(toEnd));
     }
     return q;
   }
 
-  Widget _buildFiltersBar() {
-    return Column(
-      children: [
-        Row(children: [
-          const SizedBox(width: 12),
-          Expanded(
-            child: TextField(
-              controller: _searchCtrl,
-              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Buscar por referencia exacta'),
-              onSubmitted: (_) => setState(() {}),
-            ),
-          ),
-          const SizedBox(width: 12),
-          IconButton(
-            tooltip: 'Fecha desde',
-            onPressed: () async {
-              final picked = await showDatePicker(context: context, initialDate: _from ?? DateTime.now(), firstDate: DateTime(2000), lastDate: DateTime(2100));
-              if (picked != null) setState(() => _from = picked);
-            },
-            icon: const Icon(Icons.date_range),
-          ),
-          IconButton(
-            tooltip: 'Fecha hasta',
-            onPressed: () async {
-              final picked = await showDatePicker(context: context, initialDate: _to ?? DateTime.now(), firstDate: DateTime(2000), lastDate: DateTime(2100));
-              if (picked != null) setState(() => _to = picked);
-            },
-            icon: const Icon(Icons.date_range_outlined),
-          ),
-          IconButton(
-            tooltip: 'Limpiar filtros',
-            onPressed: () => setState(() {
-              _from = null;
-              _to = null;
-              _filterProductId = null;
-              _searchCtrl.clear();
-            }),
-            icon: const Icon(Icons.clear),
-          ),
-        ]),
-        const SizedBox(height: 8),
-        FutureBuilder<QuerySnapshot>(
-          future: productsRef.orderBy('name').get(),
-          builder: (context, snap) {
-            if (!snap.hasData) return const SizedBox();
-            final docs = snap.data!.docs;
-            return Row(children: [
-              const Text('Producto:'),
-              const SizedBox(width: 8),
-DropdownButton<String?>(
-  value: _filterProductId,
-  hint: const Text('Todos'),
-  items: [null, ...docs.map((d) => d.id)].map((pid) {
-    if (pid == null) {
-      return const DropdownMenuItem<String?>(value: null, child: Text('Todos'));
+  Future<void> _pickDateRange() async {
+    final now = DateTime.now();
+    final res = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 2),
+      lastDate: DateTime(now.year + 2),
+      initialDateRange: (_from != null && _to != null)
+          ? DateTimeRange(start: _from!, end: _to!)
+          : null,
+    );
+    if (res != null) {
+      setState(() {
+        _from = res.start;
+        _to = res.end;
+      });
     }
-    final m = (docs.firstWhere((x) => x.id == pid).data() as Map<String, dynamic>);
-    return DropdownMenuItem<String?>(value: pid, child: Text('${m['name'] ?? '—'} (${m['sku'] ?? '—'})'));
-  }).toList(),
-  onChanged: (String? v) => setState(() => _filterProductId = v),
-),
-              const SizedBox(width: 12),
-              Expanded(child: Container()),
-              ElevatedButton.icon(
-                onPressed: _activeTab == 'ingresos' ? _showCreateIngresoDialog : _showCreateEgresoDialog,
-                icon: Icon(_activeTab == 'ingresos' ? Icons.add_shopping_cart : Icons.sell),
-                label: Text(_activeTab == 'ingresos' ? 'Nuevo ingreso' : 'Nuevo egreso'),
-                style: ElevatedButton.styleFrom(backgroundColor: kGreen2),
-              ),
-            ]);
-          },
-        ),
-      ],
+  }
+
+  // --- CREAR MOVIMIENTO ---
+  Future<void> _showNewMovementSheet(String type) async {
+    assert(type == 'ingreso' || type == 'egreso');
+
+    final items = <_MovementItemDraft>[];
+    final noteCtrl = TextEditingController();
+    final counterpartyCtrl = TextEditingController();
+
+    // Cargamos productos una sola vez para el picker
+    final productsSnap = await _productsRef.orderBy('name').get();
+    final products = productsSnap.docs.map((d) {
+      final data = d.data() as Map<String, dynamic>;
+      return _ProductOption(
+        id: d.id,
+        name: (data['name'] ?? '') as String,
+        sku: (data['sku'] ?? '') as String,
+        price: ((data['price'] ?? 0) as num).toDouble(),
+        stock: (data['stock'] ?? 0) is int ? data['stock'] as int : int.tryParse('${data['stock']}') ?? 0,
+      );
+    }).toList();
+
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (c) => StatefulBuilder(
+        builder: (c, setSheet) {
+          Future<void> addItem() async {
+            _ProductOption? selected;
+            final qtyCtrl = TextEditingController(text: '1');
+            final priceCtrl = TextEditingController();
+
+            final ok = await showDialog<bool>(
+              context: context,
+              builder: (cx) {
+                return AlertDialog(
+                  title: Text(type == 'ingreso' ? 'Agregar línea (Venta)' : 'Agregar línea (Compra)'),
+                  content: SizedBox(
+                    width: 500,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        DropdownButtonFormField<_ProductOption>(
+                          value: selected,
+                          isExpanded: true,
+                          items: products
+                              .map((p) => DropdownMenuItem(value: p, child: Text('${p.name}  (SKU: ${p.sku})  • Stock: ${p.stock}')))
+                              .toList(),
+                          onChanged: (v) {
+                            selected = v;
+                            priceCtrl.text = v?.price.toStringAsFixed(2) ?? '';
+                          },
+                          decoration: const InputDecoration(labelText: 'Producto'),
+                          validator: (v) => v == null ? 'Seleccione producto' : null,
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: qtyCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(),
+                          decoration: const InputDecoration(labelText: 'Cantidad'),
+                        ),
+                        const SizedBox(height: 12),
+                        TextFormField(
+                          controller: priceCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: InputDecoration(
+                            labelText: type == 'ingreso' ? 'Precio de venta (unidad)' : 'Precio de compra (unidad)',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(cx, false), child: const Text('Cancelar')),
+                    ElevatedButton(onPressed: () => Navigator.pop(cx, true), child: const Text('Agregar')),
+                  ],
+                );
+              },
+            );
+
+            if (ok == true && selected != null) {
+              final qty = int.tryParse(qtyCtrl.text) ?? 0;
+              final price = double.tryParse(priceCtrl.text.replaceAll(',', '.')) ?? selected!.price;
+              if (qty <= 0) {
+                _snack('Cantidad inválida');
+                return;
+              }
+              setSheet(() {
+                items.add(_MovementItemDraft(
+                  product: selected!,
+                  qty: qty,
+                  unitPrice: price,
+                ));
+              });
+            }
+          }
+
+          double total = 0;
+          for (final it in items) {
+            total += it.qty * it.unitPrice;
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(
+              left: 16,
+              right: 16,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+              top: 12,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      type == 'ingreso' ? 'Nuevo Ingreso (Venta)' : 'Nuevo Egreso (Compra)',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    FilledButton.icon(
+                      onPressed: addItem,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Agregar línea'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                if (items.isEmpty)
+                  const Text('Sin líneas. Agrega una para continuar.')
+                else
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 300),
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: items.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (_, i) {
+                        final it = items[i];
+                        return ListTile(
+                          title: Text('${it.product.name} (SKU: ${it.product.sku})'),
+                          subtitle: Text('Cant: ${it.qty} • P. unidad: ${it.unitPrice.toStringAsFixed(2)}'),
+                          trailing: Text('Subtotal: ${(it.qty * it.unitPrice).toStringAsFixed(2)}'),
+                          leading: IconButton(
+                            onPressed: () => setSheet(() => items.removeAt(i)),
+                            icon: const Icon(Icons.delete, color: Colors.redAccent),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: counterpartyCtrl,
+                  decoration: InputDecoration(
+                    labelText: type == 'ingreso' ? 'Cliente (opcional)' : 'Proveedor (opcional)',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: noteCtrl,
+                  decoration: const InputDecoration(labelText: 'Nota (opcional)'),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Total: ${total.toStringAsFixed(2)}',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: items.isEmpty ? null : () async {
+                        Navigator.of(context).pop();
+                        await _commitMovement(type: type, items: items, note: noteCtrl.text.trim(), counterpartyName: counterpartyCtrl.text.trim());
+                      },
+                      icon: const Icon(Icons.save),
+                      label: const Text('Guardar'),
+                    )
+                  ],
+                )
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildList() {
-    final query = _buildQueryForActiveTab();
-    return StreamBuilder<QuerySnapshot>(
-      stream: query.snapshots(),
-      builder: (context, snap) {
-        if (snap.hasError) return const Text('Error al cargar movimientos');
-        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-        final docs = snap.data!.docs;
-        if (docs.isEmpty) return const Text('No hay movimientos para los filtros seleccionados.');
+  Future<void> _commitMovement({
+    required String type, // 'ingreso' o 'egreso'
+    required List<_MovementItemDraft> items,
+    String? note,
+    String? counterpartyName,
+  }) async {
+    setState(() => _busy = true);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      final uid = user?.uid ?? 'unknown';
+      final uname = (user?.displayName?.trim().isNotEmpty == true)
+          ? user!.displayName!
+          : (user?.email ?? 'Usuario');
 
-        return ListView.separated(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: docs.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 8),
-          itemBuilder: (ctx, i) {
-            final d = docs[i];
-            final data = d.data() as Map<String, dynamic>;
-            final date = data['createdAt'] is Timestamp ? (data['createdAt'] as Timestamp).toDate() : null;
-            final qty = data['qty'] ?? 0;
-            final unitPrice = data['unitPrice'] ?? 0;
-            final total = (data['subtotal'] ?? (qty * unitPrice));
-            final productId = data['productId'] ?? '';
-            final party = _activeTab == 'ingresos' ? (data['providerId'] ?? '—') : (data['customer'] ?? data['party'] ?? '—');
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        final movementItems = <Map<String, dynamic>>[];
+        double total = 0;
 
-            return FutureBuilder<DocumentSnapshot>(
-              future: productId != null && productId.toString().isNotEmpty ? productsRef.doc(productId).get() : Future.value(null),
-              builder: (context, prodSnap) {
-                String prodLabel = productId;
-                if (prodSnap.hasData && prodSnap.data != null && prodSnap.data!.exists) {
-                  final pd = prodSnap.data!.data() as Map<String, dynamic>;
-                  prodLabel = '${pd['name'] ?? '—'} (${pd['sku'] ?? '—'})';
-                }
-                return Card(
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: ListTile(
-                    leading: CircleAvatar(backgroundColor: kGreen3, child: Text(prodLabel.isNotEmpty ? prodLabel.substring(0,1).toUpperCase() : '?')),
-                    title: Text('${_activeTab == 'ingresos' ? 'Ingreso' : 'Egreso'} • $prodLabel'),
-                    subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text('Cantidad: $qty • Precio unitario: ${unitPrice.toString()} • Total: ${total.toString()}'),
-                      Text('Parte: $party'),
-                      Text('Referencia: ${data['reference'] ?? '—'}'),
-                      if ((data['notes'] ?? '').toString().isNotEmpty) Text('Notas: ${data['notes']}'),
-                      Text('Fecha: ${date?.toString() ?? '—'}'),
-                    ]),
-                    isThreeLine: true,
-                    trailing: PopupMenuButton<String>(
-                      onSelected: (action) async {
-                        if (action == 'view') {
-                          await showDialog(context: context, builder: (c) => AlertDialog(
-                            title: Text('${_activeTab == 'ingresos' ? 'Ingreso' : 'Egreso'} detalle'),
-                            content: SingleChildScrollView(child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Producto: $prodLabel'),
-                                Text('Cantidad: $qty'),
-                                Text('Precio unitario: ${unitPrice.toString()}'),
-                                Text('Total: ${total.toString()}'),
-                                Text('Parte: $party'),
-                                Text('Referencia: ${data['reference'] ?? '—'}'),
-                                Text('Notas: ${data['notes'] ?? ''}'),
-                                Text('Fecha: ${date?.toString() ?? '—'}'),
-                              ],
-                            ))),
-                          );
-                        } else if (action == 'delete') {
-                          final ok = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
-                            title: const Text('Confirmar eliminación'),
-                            content: const Text('Eliminar este movimiento no revertirá el stock automáticamente. ¿Deseas continuar?'),
-                            actions: [
-                              TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-                              TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Eliminar')),
+        for (final draft in items) {
+          final prodRef = _productsRef.doc(draft.product.id);
+          final prodSnap = await tx.get(prodRef);
+          if (!prodSnap.exists) {
+            throw Exception('Producto no encontrado: ${draft.product.name}');
+          }
+          final pData = prodSnap.data() as Map<String, dynamic>;
+          final currentStock = (pData['stock'] ?? 0) is int
+              ? pData['stock'] as int
+              : int.tryParse('${pData['stock']}') ?? 0;
+
+          // Calcular nuevo stock según el tipo
+          int newStock = currentStock;
+          if (type == 'ingreso') {
+            // Venta = sale -> disminuye stock
+            if (draft.qty > currentStock) {
+              throw Exception('Stock insuficiente para ${draft.product.name} (disponible: $currentStock)');
+            }
+            newStock = currentStock - draft.qty;
+          } else {
+            // Egreso = compra -> aumenta stock
+            newStock = currentStock + draft.qty;
+          }
+
+          tx.update(prodRef, {
+            'stock': newStock,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+
+          final lineSubtotal = draft.qty * draft.unitPrice;
+          total += lineSubtotal;
+
+          movementItems.add({
+            'productId': draft.product.id,
+            'productName': draft.product.name,
+            'sku': draft.product.sku,
+            'qty': draft.qty,
+            'unitPrice': draft.unitPrice,
+            'subtotal': lineSubtotal,
+            'stockBefore': currentStock,
+            'stockAfter': newStock,
+          });
+        }
+
+        final movRef = _movementsRef.doc();
+        tx.set(movRef, {
+          'type': type,
+          'createdAt': FieldValue.serverTimestamp(),
+          'createdByUid': uid,
+          'createdByName': uname,
+          'note': (note ?? '').isEmpty ? null : note,
+          'counterpartyType': type == 'ingreso' ? 'cliente' : 'proveedor',
+          'counterpartyName': (counterpartyName ?? '').isEmpty ? null : counterpartyName,
+          'totalItems': items.length,
+          'totalAmount': total,
+          'items': movementItems,
+        });
+      });
+
+      _snack('Movimiento guardado y stock actualizado.');
+    } catch (e) {
+      _snack('Error: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  // --- UI ---
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Cabecera con acciones principales
+        Row(
+          children: [
+            Text(
+              'Movimientos',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+            ),
+            const Spacer(),
+            // Toggle de vistas: Todos / Ingresos / Egresos
+            SegmentedButton<_View>(
+              segments: const [
+                ButtonSegment(value: _View.all, label: Text('Todos'), icon: Icon(Icons.all_inbox)),
+                ButtonSegment(value: _View.ingresos, label: Text('Ingresos'), icon: Icon(Icons.trending_up)),
+                ButtonSegment(value: _View.egresos, label: Text('Egresos'), icon: Icon(Icons.trending_down)),
+              ],
+              selected: <_View>{_view},
+              onSelectionChanged: (s) => setState(() => _view = s.first),
+            ),
+            const SizedBox(width: 12),
+            // Rango de fechas
+            OutlinedButton.icon(
+              onPressed: _pickDateRange,
+              icon: const Icon(Icons.date_range),
+              label: Text(
+                (_from == null || _to == null)
+                    ? 'Rango de fechas'
+                    : '${_from!.day}/${_from!.month}/${_from!.year} - ${_to!.day}/${_to!.month}/${_to!.year}',
+              ),
+            ),
+            if (_from != null || _to != null)
+              IconButton(
+                tooltip: 'Limpiar filtro de fecha',
+                onPressed: () => setState(() { _from = null; _to = null; }),
+                icon: const Icon(Icons.clear),
+              ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: () => _showNewMovementSheet('ingreso'),
+              icon: const Icon(Icons.add_shopping_cart),
+              label: const Text('Nuevo ingreso'),
+            ),
+            const SizedBox(width: 8),
+            FilledButton.icon(
+              onPressed: () => _showNewMovementSheet('egreso'),
+              icon: const Icon(Icons.move_to_inbox),
+              label: const Text('Nuevo egreso'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        if (_busy) const LinearProgressIndicator(minHeight: 2),
+
+        // Lista/Tabla de movimientos
+        StreamBuilder<QuerySnapshot>(
+          stream: _buildQuery().snapshots(),
+          builder: (context, snap) {
+            if (snap.hasError) return const Text('Error al cargar movimientos');
+            if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+            final docs = snap.data!.docs;
+
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final isMobile = constraints.maxWidth < 800;
+
+                if (isMobile) {
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemBuilder: (_, i) {
+                      final d = docs[i];
+                      final m = d.data() as Map<String, dynamic>;
+                      final ts = m['createdAt'];
+                      DateTime? dt; if (ts is Timestamp) dt = ts.toDate();
+                      final items = (m['items'] as List<dynamic>? ?? []).cast<Map>();
+
+                      return Card(
+                        child: ExpansionTile(
+                          leading: CircleAvatar(
+                            child: Icon(m['type'] == 'ingreso' ? Icons.trending_up : Icons.trending_down),
+                          ),
+                          title: Text('${m['type'] == 'ingreso' ? 'Ingreso' : 'Egreso'}  •  ${m['createdByName'] ?? '—'}'),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (dt != null) Text('${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}'),
+                              Text('Líneas: ${m['totalItems'] ?? items.length} • Total: ${(m['totalAmount'] ?? 0).toString()}'),
+                              if ((m['counterpartyName'] ?? '') != '')
+                                Text(m['type'] == 'ingreso' ? 'Cliente: ${m['counterpartyName']}' : 'Proveedor: ${m['counterpartyName']}'),
+                              if ((m['note'] ?? '') != '') Text('Nota: ${m['note']}'),
                             ],
-                          ));
-                          if (ok == true) {
-                            try {
-                              await ( _activeTab == 'ingresos' ? ingresosRef.doc(d.id).delete() : egresosRef.doc(d.id).delete() );
-                              _showSnack('Movimiento eliminado. Ten en cuenta que el stock no fue revertido automáticamente.');
-                            } catch (e) {
-                              _showSnack('Error al eliminar: $e');
-                            }
-                          }
-                        }
-                      },
-                      itemBuilder: (_) => [
-                        const PopupMenuItem(value: 'view', child: ListTile(leading: Icon(Icons.visibility), title: Text('Ver'))),
-                        const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete), title: Text('Eliminar'))),
-                      ],
-                    ),
+                          ),
+                          children: [
+                            const Divider(height: 1),
+                            ...items.map((it) {
+                              return ListTile(
+                                dense: true,
+                                title: Text('${it['productName']} (SKU: ${it['sku']})'),
+                                subtitle: Text('Cant: ${it['qty']} • P. unidad: ${it['unitPrice']} • Subtotal: ${it['subtotal']}'),
+                                trailing: Text('Stock: ${it['stockBefore']} → ${it['stockAfter']}'),
+                              );
+                            }),
+                          ],
+                        ),
+                      );
+                    },
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemCount: docs.length,
+                  );
+                }
+
+                // Escritorio: DataTable simple
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columns: const [
+                      DataColumn(label: Text('Fecha')),
+                      DataColumn(label: Text('Tipo')),
+                      DataColumn(label: Text('Usuario')),
+                      DataColumn(label: Text('Contraparte')),
+                      DataColumn(label: Text('Líneas')),
+                      DataColumn(label: Text('Total')),
+                      DataColumn(label: Text('Detalle')),
+                    ],
+                    rows: docs.map((d) {
+                      final m = d.data() as Map<String, dynamic>;
+                      final ts = m['createdAt'];
+                      DateTime? dt; if (ts is Timestamp) dt = ts.toDate();
+                      final items = (m['items'] as List<dynamic>? ?? []).cast<Map>();
+                      return DataRow(cells: [
+                        DataCell(Text(dt == null ? '—' : '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}')),
+                        DataCell(Chip(label: Text(m['type'] == 'ingreso' ? 'Ingreso' : 'Egreso'))),
+                        DataCell(Text(m['createdByName'] ?? '—')),
+                        DataCell(Text((m['counterpartyName'] ?? '—').toString())),
+                        DataCell(Text((m['totalItems'] ?? items.length).toString())),
+                        DataCell(Text((m['totalAmount'] ?? 0).toString())),
+                        DataCell(
+                          IconButton(
+                            tooltip: 'Ver líneas',
+                            onPressed: () {
+                              showDialog(
+                                context: context,
+                                builder: (cx) => AlertDialog(
+                                  title: const Text('Detalle del movimiento'),
+                                  content: SizedBox(
+                                    width: 600,
+                                    child: ListView(
+                                      shrinkWrap: true,
+                                      children: [
+                                        if ((m['note'] ?? '') != '') Padding(
+                                          padding: const EdgeInsets.only(bottom: 8.0),
+                                          child: Text('Nota: ${m['note']}'),
+                                        ),
+                                        ...items.map((it) => ListTile(
+                                          dense: true,
+                                          title: Text('${it['productName']} (SKU: ${it['sku']})'),
+                                          subtitle: Text('Cant: ${it['qty']} • P. unidad: ${it['unitPrice']} • Subtotal: ${it['subtotal']}'),
+                                          trailing: Text('Stock: ${it['stockBefore']} → ${it['stockAfter']}'),
+                                        )),
+                                      ],
+                                    ),
+                                  ),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(cx), child: const Text('Cerrar')),
+                                  ],
+                                ),
+                              );
+                            },
+                            icon: const Icon(Icons.list),
+                          ),
+                        ),
+                      ]);
+                    }).toList(),
                   ),
                 );
               },
             );
           },
-        );
-      },
-    );
-  }
-
-  Widget _buildInitialTable() {
-    return StreamBuilder<List<MovementItem>>(
-      stream: _getAllMovementsStream(),
-      builder: (context, snap) {
-        if (snap.hasError) return const Text('Error al cargar movimientos');
-        if (!snap.hasData) return const Center(child: CircularProgressIndicator());
-        final movements = snap.data!;
-        if (movements.isEmpty) {
-          return const Center(
-            child: Text('Aún no existen movimientos registrados.', style: TextStyle(fontSize: 16, color: Colors.grey)),
-          );
-        }
-
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            columns: const [
-              DataColumn(label: Text('Tipo')),
-              DataColumn(label: Text('Producto')),
-              DataColumn(label: Text('Cantidad')),
-              DataColumn(label: Text('Precio Unitario')),
-              DataColumn(label: Text('Total')),
-              DataColumn(label: Text('Parte')),
-              DataColumn(label: Text('Fecha')),
-            ],
-            rows: movements.map((m) {
-              return DataRow(cells: [
-                DataCell(Text(m.type == 'ingreso' ? 'Ingreso' : 'Egreso')),
-                DataCell(FutureBuilder<DocumentSnapshot>(
-                  future: m.productId != null && m.productId!.isNotEmpty ? productsRef.doc(m.productId).get() : Future.value(null),
-                  builder: (context, prodSnap) {
-                    String prodLabel = m.productId ?? '—';
-                    if (prodSnap.hasData && prodSnap.data != null && prodSnap.data!.exists) {
-                      final pd = prodSnap.data!.data() as Map<String, dynamic>;
-                      prodLabel = '${pd['name'] ?? '—'} (${pd['sku'] ?? '—'})';
-                    }
-                    return Text(prodLabel);
-                  },
-                )),
-                DataCell(Text(m.qty.toString())),
-                DataCell(Text(m.data['unitPrice']?.toString() ?? '—')),
-                DataCell(Text(m.total.toStringAsFixed(2))),
-                DataCell(Text(m.party ?? '—')),
-                DataCell(Text('${m.date.day}/${m.date.month}/${m.date.year}')),
-              ]);
-            }).toList(),
-          ),
-        );
-      },
-    );
-  }
-
-  Stream<List<MovementItem>> _getAllMovementsStream() {
-    final ingresosStream = ingresosRef.orderBy('createdAt', descending: true).snapshots();
-    final egresosStream = egresosRef.orderBy('createdAt', descending: true).snapshots();
-
-    // Usamos Future.wait para obtener los primeros snapshots de ambas colecciones,
-    // y luego lo convertimos a Stream con Stream.fromFuture. Esto devuelve un Stream
-    // de un único evento con la lista de QuerySnapshot (lo que esperábamos originalmente).
-    return Stream.fromFuture(Future.wait([ingresosStream.first, egresosStream.first]))
-        .asyncMap((snapshotsList) {
-      final ingresosSnap = snapshotsList[0] as QuerySnapshot;
-      final egresosSnap = snapshotsList[1] as QuerySnapshot;
-
-      final movements = <MovementItem>[];
-
-      for (var doc in ingresosSnap.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final date = data['createdAt'] is Timestamp ? (data['createdAt'] as Timestamp).toDate() : DateTime.now();
-        final qty = data['qty'] ?? 0;
-        final total = (data['subtotal'] ?? 0.0).toDouble();
-        final party = data['providerId'] ?? '—';
-        movements.add(MovementItem('ingreso', data, date, data['productId'], qty, total, party, doc.id));
-      }
-
-      for (var doc in egresosSnap.docs) {
-        final data = doc.data() as Map<String, dynamic>;
-        final date = data['createdAt'] is Timestamp ? (data['createdAt'] as Timestamp).toDate() : DateTime.now();
-        final qty = data['qty'] ?? 0;
-        final total = (data['subtotal'] ?? 0.0).toDouble();
-        final party = data['customer'] ?? '—';
-        movements.add(MovementItem('egreso', data, date, data['productId'], qty, total, party, doc.id));
-      }
-
-      movements.sort((a, b) => b.date.compareTo(a.date));
-      return movements;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Header con botones principales
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Movimientos', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kGreen1)),
-            Row(children: [
-              ElevatedButton(
-                onPressed: () => Navigator.pushNamed(context, '/ingresos'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kGreen2,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('Ingresos'),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton(
-                onPressed: () => Navigator.pushNamed(context, '/egresos'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: kGreen2,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('Egresos'),
-              ),
-            ]),
-          ],
         ),
-        const SizedBox(height: 12),
-        // Tabla inicial con todos los registros
-        _buildInitialTable(),
-        const SizedBox(height: 12),
-        // Filtros y lista filtrada (opcional, para vista detallada)
-        ExpansionTile(
-          title: const Text('Vista Detallada con Filtros'),
-          children: [
-            _buildFiltersBar(),
-            const SizedBox(height: 12),
-            _buildList(),
-          ],
-        ),
-        if (_loadingAction) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
       ],
     );
   }
+}
+
+// --- Helpers ---
+class _ProductOption {
+  final String id;
+  final String name;
+  final String sku;
+  final double price;
+  final int stock;
+  _ProductOption({required this.id, required this.name, required this.sku, required this.price, required this.stock});
+}
+
+class _MovementItemDraft {
+  final _ProductOption product;
+  final int qty;
+  final double unitPrice;
+  _MovementItemDraft({required this.product, required this.qty, required this.unitPrice});
 }

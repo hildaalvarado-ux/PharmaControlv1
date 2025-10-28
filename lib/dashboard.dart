@@ -22,7 +22,7 @@ class _DashboardPageState extends State<DashboardPage> {
   String _name = '';
   bool _loading = true;
   DateTime? _loadedAt;
-  int _selectedIndex = 0;
+  int _selectedIndex = 0; // 0 = Ofertas (HomeCarousel) por defecto
 
   @override
   void initState() {
@@ -44,6 +44,7 @@ class _DashboardPageState extends State<DashboardPage> {
         _name = data?['name'] ?? user.email ?? 'Usuario';
         _loading = false;
         _loadedAt = DateTime.now();
+        _selectedIndex = 0; // aseguramos Ofertas como primera vista
       });
     } catch (e) {
       setState(() {
@@ -81,12 +82,28 @@ class _DashboardPageState extends State<DashboardPage> {
 
   String _roleNorm() => _role.toLowerCase();
 
+  void _selectPage(int index) {
+    if (!mounted) return;
+    setState(() => _selectedIndex = index);
+  }
+
+  // ---- Navegación rápida
+  void _openOfertas() => _selectPage(0);
+  void _openUsuarios() => _selectPage(1);
+  void _openProductos() => _selectPage(2);
+  void _openMovimientos() => _selectPage(3);
+  void _openInventario() => _selectPage(4);
+  void _openEgresos() => _selectPage(5);
+  void _openProveedores() => _selectPage(6);
+  void _openSobreNosotros() => _selectPage(7);
+
+  // ---- Menú Drawer
   Widget _buildMenuTile({required IconData icon, required String title, VoidCallback? onTap}) {
     return ListTile(
       leading: Icon(icon, color: kGreen1),
       title: Text(title),
       onTap: () {
-        Navigator.of(context).pop(); // cerrar menú móvil
+        Navigator.of(context).pop();
         if (onTap != null) onTap();
       },
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -95,30 +112,18 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
-  void _selectPage(int index) {
-    if (!mounted) return;
-    setState(() {
-      _selectedIndex = index;
-    });
-  }
-
-  void _openUsuarios() => _selectPage(1);
-  void _openProductos() => _selectPage(2);
-  void _openMovimientos() => _selectPage(3);
-  void _openEgresos() => _selectPage(5);
-  void _openInventario() => _selectPage(4);
-  void _openProveedores() => _selectPage(6);
-
   Widget _adminMenu() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text('Panel de Administrador', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
+        _buildMenuTile(icon: Icons.local_offer, title: 'Ofertas', onTap: _openOfertas),
         _buildMenuTile(icon: Icons.manage_accounts, title: 'Gestionar usuarios', onTap: _openUsuarios),
         _buildMenuTile(icon: Icons.production_quantity_limits, title: 'Gestionar productos', onTap: _openProductos),
         _buildMenuTile(icon: Icons.swap_vert, title: 'Movimientos', onTap: _openMovimientos),
         _buildMenuTile(icon: Icons.inventory_2, title: 'Inventario', onTap: _openInventario),
+        _buildMenuTile(icon: Icons.local_shipping, title: 'Proveedores', onTap: _openProveedores),
       ],
     );
   }
@@ -129,6 +134,7 @@ class _DashboardPageState extends State<DashboardPage> {
       children: [
         const Text('Panel Farmacéutico', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
+        _buildMenuTile(icon: Icons.local_offer, title: 'Ofertas', onTap: _openOfertas),
         _buildMenuTile(icon: Icons.production_quantity_limits, title: 'Gestionar productos', onTap: _openProductos),
         _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar Egreso (Factura)', onTap: _openEgresos),
       ],
@@ -141,6 +147,7 @@ class _DashboardPageState extends State<DashboardPage> {
       children: [
         const Text('Panel Vendedor', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
+        _buildMenuTile(icon: Icons.local_offer, title: 'Ofertas', onTap: _openOfertas),
         _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar Egreso (Factura)', onTap: _openEgresos),
       ],
     );
@@ -154,9 +161,17 @@ class _DashboardPageState extends State<DashboardPage> {
     return const Text('Rol no definido o sin permisos.', style: TextStyle(color: Colors.red));
   }
 
+  // ---- Acciones AppBar (escritorio)
   List<Widget> _actionsForRole() {
     final role = _roleNorm();
     final List<Widget> actions = [];
+
+    actions.add(
+      TextButton(
+        onPressed: _openOfertas,
+        child: const Text("Ofertas", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+      ),
+    );
 
     if (role == 'admin') {
       actions.addAll([
@@ -175,70 +190,18 @@ class _DashboardPageState extends State<DashboardPage> {
       actions.add(TextButton(onPressed: _openEgresos, child: const Text("Registrar Egreso", style: TextStyle(color: Colors.white))));
     }
 
-    actions.add(TextButton(onPressed: () => _selectPage(0), child: const Text("Sobre nosotros", style: TextStyle(color: Colors.white))));
+    actions.add(TextButton(onPressed: _openSobreNosotros, child: const Text("Sobre nosotros", style: TextStyle(color: Colors.white))));
     actions.add(IconButton(onPressed: _onSignOutPressed, icon: const Icon(Icons.logout, color: Colors.white)));
     return actions;
   }
 
-  Widget _buildDrawerContents(bool isMobile) {
-    return ListView(
-      padding: EdgeInsets.zero,
-      children: [
-        DrawerHeader(
-          decoration: BoxDecoration(color: kGreen1),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text('PharmaControl',
-                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 60,
-                child: Image.asset(
-                  'assets/logo.png',
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, color: Colors.white, size:90),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text('Bienvenido, $_name', style: const TextStyle(color: Colors.white70)),
-              const SizedBox(height: 4),
-              Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            ],
-          ),
-        ),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: _menuForRole()),
-        const SizedBox(height: 12),
-        const Divider(),
-        _buildMenuTile(icon: Icons.help_outline, title: 'Sobre nosotros', onTap: () => _selectPage(0)),
-        if (_roleNorm() == 'admin')
-          _buildMenuTile(icon: Icons.local_shipping, title: 'Proveedores', onTap: _openProveedores),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12.0),
-          child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: kGreen2,
-              minimumSize: const Size.fromHeight(44),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: _onSignOutPressed,
-            icon: const Icon(Icons.logout),
-            label: const Text('Cerrar sesión', style: TextStyle(color: Colors.white)),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _pageHomeCardContent() => HomeCarousel();
-  Widget _pageUsuariosCardContent() => const AdminUserManager();
-  Widget _pageProductosCardContent() => const AdminProductManager();
-  Widget _pageMovimientosCardContent() => const MovementsManager();
-  Widget _pageInventarioCardContent() => Center(child: Text('Inventario (rol: ${_roleNorm()})'));
-
-  Widget _pageEgresosCardContent() {
+  // ---- Páginas
+  Widget _pageOfertas() => const HomeCarousel();
+  Widget _pageUsuarios() => const AdminUserManager();
+  Widget _pageProductos() => const AdminProductManager();
+  Widget _pageMovimientos() => const MovementsManager();
+  Widget _pageInventario() => Center(child: Text('Inventario (rol: ${_roleNorm()})'));
+  Widget _pageEgresos() {
     return Padding(
       padding: const EdgeInsets.all(8.0),
       child: SingleChildScrollView(child: EgresoFormWidget(userRole: _roleNorm())),
@@ -247,48 +210,156 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _cardContentByIndex() {
     switch (_selectedIndex) {
+      case 0:
+        return _pageOfertas();
       case 1:
-        return _pageUsuariosCardContent();
+        return _pageUsuarios();
       case 2:
-        return _pageProductosCardContent();
+        return _pageProductos();
       case 3:
-        return _pageMovimientosCardContent();
+        return _pageMovimientos();
       case 4:
-        return _pageInventarioCardContent();
+        return _pageInventario();
       case 5:
-        return _pageEgresosCardContent();
+        return _pageEgresos();
       case 6:
         return ProvidersManager();
-      default:
+      case 7:
         return const SobreNosotrosPage();
+      default:
+        return _pageOfertas();
     }
   }
 
+  // ---- AppBar title: SOLO texto (quitamos logo al lado de “PharmaControl”)
   Widget _buildAppBarTitle(bool isMobile) {
-    if (isMobile) {
-      return const Text("PharmaControl", style: TextStyle(color: Colors.white));
-    } else {
-      return Row(
-        children: [
-          SizedBox(
-            height: 34,
-            child: Image.asset(
-              'assets/logo.png',
-              fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) =>
-                  const Icon(Icons.inventory_2, color: Colors.white, size: 28),
-            ),
-          ),
-          const SizedBox(width: 8),
-          const Text("PharmaControl", style: TextStyle(color: Colors.white)),
+    return const Text("PharmaControl", style: TextStyle(color: Colors.white));
+  }
+
+  // ---- Encabezado responsive con logo grande a la derecha
+  Widget _headerResponsive(bool isMobile) {
+    final logo = Container(
+      height: isMobile ? 48 : 72,
+      width: isMobile ? 48 : 72,
+      padding: const EdgeInsets.all(6),
+      decoration: BoxDecoration(
+        color: isMobile ? Colors.white : Colors.white, // fondo claro para contraste en móvil
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 3),
+          )
         ],
-      );
-    }
+      ),
+      child: Image.asset(
+        'assets/logo.png',
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, color: Colors.green),
+      ),
+    );
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: isMobile ? 12 : 16),
+      decoration: BoxDecoration(
+        color: kGreen1.withOpacity(0.12), // bloque verde más visible
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: isMobile
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text('Bienvenido, $_name',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kGreen1)),
+                const SizedBox(height: 4),
+                Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
+                    textAlign: TextAlign.center, style: const TextStyle(fontSize: 14)),
+                const SizedBox(height: 10),
+                logo, // logo bajo el texto con fondo visible
+              ],
+            )
+          : Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Bienvenido, $_name',
+                          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: kGreen1)),
+                      const SizedBox(height: 6),
+                      Text('Rol: ${_role.isNotEmpty ? _role : '—'}', style: const TextStyle(fontSize: 14)),
+                    ],
+                  ),
+                ),
+                // Logo a la derecha (donde marcaste la “L”)
+                logo,
+              ],
+            ),
+    );
+  }
+
+  // ---- Drawer
+  Widget _buildDrawerContents(bool isMobile) {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+        // Header más compacto para evitar overflow
+        Container(
+          padding: const EdgeInsets.fromLTRB(16, 28, 16, 16),
+          decoration: BoxDecoration(color: kGreen1),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('PharmaControl',
+                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              Container(
+                height: 56,
+                width: 56,
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.white, // contraste en móvil
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Image.asset('assets/logo.png', fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, color: Colors.green)),
+              ),
+              const SizedBox(height: 10),
+              Text('Bienvenido, $_name', style: const TextStyle(color: Colors.white70)),
+              const SizedBox(height: 4),
+              Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            ],
+          ),
+        ),
+        Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: _menuForRole()),
+        const SizedBox(height: 8),
+        const Divider(),
+        _buildMenuTile(icon: Icons.info_outline, title: 'Sobre nosotros', onTap: _openSobreNosotros),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12),
+          child: ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kGreen2,
+              minimumSize: const Size.fromHeight(44),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: _onSignOutPressed,
+            icon: const Icon(Icons.logout, color: Colors.white),
+            label: const Text('Cerrar sesión', style: TextStyle(color: Colors.white)),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final bool isMobile = MediaQuery.of(context).size.width < 600;
+    final bool isMobile = MediaQuery.of(context).size.width < 800;
     final double screenHeight = MediaQuery.of(context).size.height;
 
     return WillPopScope(
@@ -298,7 +369,7 @@ class _DashboardPageState extends State<DashboardPage> {
           backgroundColor: kGreen1,
           iconTheme: const IconThemeData(color: Colors.white),
           automaticallyImplyLeading: isMobile,
-          title: _buildAppBarTitle(isMobile),
+          title: _buildAppBarTitle(isMobile), // solo texto, sin logo al lado
           actions: isMobile ? [] : _actionsForRole(),
         ),
         drawer: isMobile ? Drawer(child: _buildDrawerContents(isMobile)) : null,
@@ -311,61 +382,14 @@ class _DashboardPageState extends State<DashboardPage> {
                 ? const Center(child: CircularProgressIndicator())
                 : SingleChildScrollView(
                     child: Column(
-                      crossAxisAlignment:
-                          isMobile ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        if (!isMobile)
-                          Row(
-                            children: [
-                              SizedBox(
-                                height: 34,
-                                child: Image.asset(
-                                  'assets/logo.png',
-                                  fit: BoxFit.contain,
-                                  errorBuilder: (_, __, ___) =>
-                                      const Icon(Icons.inventory_2, color: Colors.green, size: 28),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text('Bienvenido, $_name',
-                                      style: TextStyle(
-                                          fontSize: 22,
-                                          fontWeight: FontWeight.bold,
-                                          color: kGreen1)),
-                                  const SizedBox(height: 4),
-                                  Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
-                                      style: const TextStyle(fontSize: 14)),
-                                ],
-                              ),
-                            ],
-                          )
-                        else ...[
-                          Text('Bienvenido, $_name',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  fontSize: 22, fontWeight: FontWeight.bold, color: kGreen1)),
-                          const SizedBox(height: 4),
-                          Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 14)),
-                          const SizedBox(height: 8),
-                          SizedBox(
-                            height: 40,
-                            child: Image.asset(
-                              'assets/logo.png',
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, __, ___) =>
-                                  const Icon(Icons.inventory_2, color: Colors.green, size: 32),
-                            ),
-                          ),
-                        ],
+                        _headerResponsive(isMobile), // bloque de bienvenida mejorado
                         const SizedBox(height: 18),
+
+                        // Card de contenido
                         Card(
-                          shape:
-                              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           elevation: 3,
                           child: Padding(
                             padding: const EdgeInsets.all(16),
@@ -377,6 +401,16 @@ class _DashboardPageState extends State<DashboardPage> {
                   ),
           ),
         ),
+        // Botón flotante de Ofertas en móvil (acceso rápido)
+        floatingActionButton: isMobile
+            ? FloatingActionButton.extended(
+                heroTag: 'fabOfertas',
+                backgroundColor: kGreen2,
+                onPressed: _openOfertas,
+                icon: const Icon(Icons.local_offer, color: Colors.white),
+                label: const Text('Ofertas', style: TextStyle(color: Colors.white)),
+              )
+            : null,
       ),
     );
   }

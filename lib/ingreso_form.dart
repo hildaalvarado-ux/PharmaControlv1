@@ -1,54 +1,42 @@
-// lib/ingreso_form.dart
-// Formulario para registrar Compras (Ingresos de stock).
-// - Permite varias líneas de productos (patrón igual al de Egresos)
-// - Seleccionar productos existentes o crear producto nuevo desde el modal
-// - Registrar proveedor, fecha de compra, factura/serie, fecha de fabricación y vencimiento
-// - Calcula automáticamente precio de venta sugerido a partir del precio de compra y el margen
-// - Al guardar, incrementa el stock de cada producto con una transacción en Firestore
-
+// Formulario para registrar Compras (Ingresos de stock) con el mismo diseño que Egreso.
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
-import 'egreso_form.dart'; // Importar para usar EgresoFormWidget
 
-class IngresoFormPage extends StatefulWidget {
-  const IngresoFormPage({super.key});
-
-  @override
-  State<IngresoFormPage> createState() => _IngresoFormPageState();
-}
-
-class IngresoFormWidget extends StatelessWidget {
+class IngresoFormWidget extends StatefulWidget {
   const IngresoFormWidget({super.key});
-
   @override
-  Widget build(BuildContext context) {
-    return const IngresoFormPage();
-  }
+  State<IngresoFormWidget> createState() => _IngresoFormWidgetState();
 }
 
 class IngresoLine {
   String? productId;
   int qty;
-  double purchasePrice; // precio de compra por unidad
-  double salePrice; // calculado o editado
+  double purchasePrice; // precio de compra
+  double salePrice;     // precio de venta sugerido/definido
   DateTime? manufactureDate;
   DateTime? expiryDate;
 
-  IngresoLine({this.productId, this.qty = 1, this.purchasePrice = 0.0, this.salePrice = 0.0, this.manufactureDate, this.expiryDate});
+  IngresoLine({
+    this.productId,
+    this.qty = 1,
+    this.purchasePrice = 0.0,
+    this.salePrice = 0.0,
+    this.manufactureDate,
+    this.expiryDate,
+  });
 
   double get subtotal => qty * purchasePrice;
 }
 
-class _IngresoFormPageState extends State<IngresoFormPage> {
+class _IngresoFormWidgetState extends State<IngresoFormWidget> {
   final CollectionReference productsRef = FirebaseFirestore.instance.collection('products');
   final CollectionReference providersRef = FirebaseFirestore.instance.collection('providers');
   final CollectionReference ingresosRef = FirebaseFirestore.instance.collection('ingresos');
 
   List<QueryDocumentSnapshot>? _products;
   Map<String, Map<String, dynamic>> _prodMap = {};
-
   List<QueryDocumentSnapshot>? _providers;
 
   final providerCtrl = TextEditingController();
@@ -73,20 +61,19 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
 
   @override
   void dispose() {
-    productFilterCtrl.dispose();
     providerCtrl.dispose();
     invoiceCtrl.dispose();
+    productFilterCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadData() async {
     final ps = await productsRef.orderBy('name').get();
     final provs = await providersRef.orderBy('name').get();
-    setState(() {
-      _products = ps.docs;
-      _prodMap = {for (var d in ps.docs) d.id: (d.data() as Map<String, dynamic>)};
-      _providers = provs.docs;
-    });
+    _products = ps.docs;
+    _prodMap = {for (var d in ps.docs) d.id: (d.data() as Map<String, dynamic>)};
+    _providers = provs.docs;
+    setState(() {});
   }
 
   int _parseIntSafe(dynamic v) {
@@ -111,9 +98,7 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
   }
 
   void _addLineAtTop({String? productId, double purchasePrice = 0.0, double salePrice = 0.0}) {
-    setState(() {
-      lines.insert(0, IngresoLine(productId: productId, qty: 1, purchasePrice: purchasePrice, salePrice: salePrice));
-    });
+    setState(() => lines.insert(0, IngresoLine(productId: productId, purchasePrice: purchasePrice, salePrice: salePrice)));
   }
 
   void _removeLine(int idx) => setState(() => lines.removeAt(idx));
@@ -142,7 +127,6 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
     final val = double.tryParse(v.replaceAll(',', '.')) ?? 0.0;
     setState(() {
       lines[idx].purchasePrice = val;
-      // recalcula venta sugerida usando margen del producto si existe
       final pid = lines[idx].productId;
       final margin = pid != null && _prodMap.containsKey(pid) ? _parseDoubleSafe(_prodMap[pid]!['marginPercent']) : 10.0;
       lines[idx].salePrice = val * (1 + (margin / 100));
@@ -180,10 +164,19 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
 
   Future<void> _pickDateForLine(int idx, {required bool isManufacture}) async {
     final now = DateTime.now();
-    final picked = await showDatePicker(context: context, initialDate: now, firstDate: DateTime(now.year - 10), lastDate: DateTime(now.year + 10));
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(now.year - 10),
+      lastDate: DateTime(now.year + 10),
+    );
     if (picked == null) return;
     setState(() {
-      if (isManufacture) lines[idx].manufactureDate = picked; else lines[idx].expiryDate = picked;
+      if (isManufacture) {
+        lines[idx].manufactureDate = picked;
+      } else {
+        lines[idx].expiryDate = picked;
+      }
     });
   }
 
@@ -197,7 +190,6 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
       return;
     }
 
-    // Validaciones
     for (var i = 0; i < lines.length; i++) {
       final l = lines[i];
       if (l.productId == null) {
@@ -220,9 +212,7 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
       final docRef = ingresosRef.doc();
       final providerId = _providers != null && _providers!.isNotEmpty ? _providers!.first.id : null;
 
-      // Transacción: crear ingreso y actualizar stock
       await FirebaseFirestore.instance.runTransaction((tx) async {
-        // Re-read product docs inside tx and update
         for (var l in lines) {
           final prodRef = productsRef.doc(l.productId);
           final prodSnap = await tx.get(prodRef);
@@ -253,7 +243,6 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
           final prodRef = productsRef.doc(l.productId);
           tx.update(prodRef, {
             'stock': FieldValue.increment(l.qty),
-            // actualizar purchasePrice y price sugerido si quieres mantener histórico
             'purchasePrice': l.purchasePrice,
             'price': l.salePrice,
             'lastPurchaseAt': FieldValue.serverTimestamp(),
@@ -272,38 +261,42 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
   }
 
   Future<void> _showCreateProductModal() async {
-    // Abre el modal de crear producto (similar al AdminProductManager). Aquí solo un ejemplo sencillo
     final nameCtrl = TextEditingController();
     final skuCtrl = TextEditingController();
     final purchaseCtrl = TextEditingController();
     final marginCtrl = TextEditingController(text: '10');
     final stockCtrl = TextEditingController(text: '0');
 
-    final created = await showDialog<bool>(context: context, builder: (c) => AlertDialog(
-      title: const Text('Crear producto rápido'),
-      content: SingleChildScrollView(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nombre')),
-          TextField(controller: skuCtrl, decoration: const InputDecoration(labelText: 'SKU')),
-          TextField(controller: purchaseCtrl, decoration: const InputDecoration(labelText: 'Precio de compra')), 
-          TextField(controller: marginCtrl, decoration: const InputDecoration(labelText: 'Margen % (sugerido)')),
-          TextField(controller: stockCtrl, decoration: const InputDecoration(labelText: 'Stock inicial')),
-        ]),
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Crear producto rápido'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nombre')),
+            TextField(controller: skuCtrl, decoration: const InputDecoration(labelText: 'SKU')),
+            TextField(controller: purchaseCtrl, decoration: const InputDecoration(labelText: 'Precio de compra')),
+            TextField(controller: marginCtrl, decoration: const InputDecoration(labelText: 'Margen % (sugerido)')),
+            TextField(controller: stockCtrl, decoration: const InputDecoration(labelText: 'Stock inicial')),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Crear')),
+        ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-        TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Crear')),
-      ],
-    ));
+    );
 
     if (created != true) return;
     try {
+      final purchase = double.tryParse(purchaseCtrl.text.replaceAll(',', '.')) ?? 0.0;
+      final margin = double.tryParse(marginCtrl.text.replaceAll(',', '.')) ?? 10.0;
       await productsRef.add({
         'name': nameCtrl.text.trim(),
         'sku': skuCtrl.text.trim(),
-        'purchasePrice': double.tryParse(purchaseCtrl.text.replaceAll(',', '.')) ?? 0.0,
-        'marginPercent': double.tryParse(marginCtrl.text.replaceAll(',', '.')) ?? 10.0,
-        'price': (double.tryParse(purchaseCtrl.text.replaceAll(',', '.')) ?? 0.0) * (1 + (double.tryParse(marginCtrl.text.replaceAll(',', '.')) ?? 10.0)/100),
+        'purchasePrice': purchase,
+        'marginPercent': margin,
+        'price': purchase * (1 + (margin / 100)),
         'stock': int.tryParse(stockCtrl.text) ?? 0,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -316,11 +309,13 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width >= 900;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Registrar Compra (Ingreso)'), backgroundColor: kGreen2),
+      appBar: AppBar(title: const Text('Registrar compra (Ingreso)'), backgroundColor: kGreen2),
       body: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1000),
+          constraints: const BoxConstraints(maxWidth: 1100),
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: _products == null
@@ -330,16 +325,29 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     child: Padding(
                       padding: const EdgeInsets.all(16.0),
-                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('Gestión de Compras', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: kGreen1)),
+                        const SizedBox(height: 12),
+
+                        // Filtro + crear producto
                         Row(children: [
                           Expanded(
                             child: TextField(
                               controller: productFilterCtrl,
-                              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), labelText: 'Buscar producto existente (nombre, sku, desc)'),
+                              decoration: const InputDecoration(
+                                prefixIcon: Icon(Icons.search),
+                                labelText: 'Buscar producto existente (nombre, sku, desc)',
+                                filled: true,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 12),
-                          ElevatedButton.icon(onPressed: _showCreateProductModal, icon: const Icon(Icons.add_box), label: const Text('Nuevo producto'), style: ElevatedButton.styleFrom(backgroundColor: kGreen2)),
+                          ElevatedButton.icon(
+                            onPressed: _showCreateProductModal,
+                            icon: const Icon(Icons.add_box),
+                            label: const Text('Nuevo producto'),
+                            style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
+                          ),
                         ]),
 
                         if (productFilterCtrl.text.trim().isNotEmpty) const SizedBox(height: 8),
@@ -357,7 +365,11 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
                                 return ListTile(
                                   title: Text((d['name'] as String?) ?? p.id),
                                   subtitle: Text('${(d['description'] as String?) ?? ''} • Stock: $stock • Compra: ${purchase.toStringAsFixed(2)}'),
-                                  trailing: ElevatedButton(onPressed: () => _onSelectFilteredProduct(p), child: const Text('Agregar')),
+                                  trailing: ElevatedButton(
+                                    onPressed: () => _onSelectFilteredProduct(p),
+                                    style: ElevatedButton.styleFrom(foregroundColor: Colors.white),
+                                    child: const Text('Agregar'),
+                                  ),
                                   onTap: () => _onSelectFilteredProduct(p),
                                 );
                               },
@@ -366,17 +378,23 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
 
                         const SizedBox(height: 12),
 
+                        // Encabezado
                         Container(
                           padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                           decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(6)),
-                          child: Row(children: const [Expanded(child: Text('Producto')), SizedBox(width: 80, child: Text('Cant.')), SizedBox(width: 140, child: Text('Precio compra')), SizedBox(width: 140, child: Text('Precio venta suger.')), SizedBox(width: 40, child: Text(''))]),
+                          child: Row(children: const [
+                            Expanded(child: Text('Producto')),
+                            SizedBox(width: 80, child: Text('Cant.')),
+                            SizedBox(width: 140, child: Text('Precio compra')),
+                            SizedBox(width: 140, child: Text('Precio venta sug.')),
+                            SizedBox(width: 40, child: Text('')),
+                          ]),
                         ),
-
                         const SizedBox(height: 8),
 
-                        Flexible(
+                        // Líneas
+                        Expanded(
                           child: ListView.builder(
-                            shrinkWrap: true,
                             itemCount: lines.length,
                             itemBuilder: (context, idx) {
                               final ln = lines[idx];
@@ -399,59 +417,47 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
                                           decoration: const InputDecoration(border: InputBorder.none),
                                         ),
                                       ),
-
                                       const SizedBox(width: 8),
-
                                       SizedBox(
                                         width: 80,
                                         child: TextFormField(
                                           initialValue: ln.qty.toString(),
                                           keyboardType: TextInputType.number,
-                                          decoration: const InputDecoration(border: InputBorder.none),
+                                          decoration: const InputDecoration(border: InputBorder.none, hintText: 'Cant.'),
                                           onChanged: (v) => _updateLineQty(idx, v),
                                         ),
                                       ),
-
                                       const SizedBox(width: 8),
-
                                       SizedBox(
                                         width: 140,
                                         child: TextFormField(
                                           initialValue: ln.purchasePrice.toStringAsFixed(2),
                                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                          decoration: const InputDecoration(border: InputBorder.none),
+                                          decoration: const InputDecoration(border: InputBorder.none, hintText: 'Compra'),
                                           onChanged: (v) => _updateLinePurchasePrice(idx, v),
                                         ),
                                       ),
-
                                       const SizedBox(width: 8),
-
                                       SizedBox(
                                         width: 140,
                                         child: TextFormField(
                                           initialValue: ln.salePrice.toStringAsFixed(2),
                                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                          decoration: const InputDecoration(border: InputBorder.none),
+                                          decoration: const InputDecoration(border: InputBorder.none, hintText: 'Venta sug.'),
                                           onChanged: (v) => _updateLineSalePrice(idx, v),
                                         ),
                                       ),
-
-                                      const SizedBox(width: 8),
-
-                                      Column(children: [
-                                        IconButton(onPressed: () => _removeLine(idx), icon: const Icon(Icons.delete_outline)),
-                                      ])
+                                      IconButton(onPressed: () => _removeLine(idx), icon: const Icon(Icons.delete_outline)),
                                     ]),
-
-                                    // fila de fechas: manufactura y vencimiento
                                     const SizedBox(height: 8),
+                                    // Fechas
                                     Row(children: [
                                       Expanded(child: Text(ln.manufactureDate == null ? 'Fecha de fabricación: —' : 'Fab: ${ln.manufactureDate!.day}/${ln.manufactureDate!.month}/${ln.manufactureDate!.year}')),
                                       TextButton(onPressed: () => _pickDateForLine(idx, isManufacture: true), child: const Text('Seleccionar')),
                                       const SizedBox(width: 8),
                                       Expanded(child: Text(ln.expiryDate == null ? 'Vencimiento: —' : 'Vence: ${ln.expiryDate!.day}/${ln.expiryDate!.month}/${ln.expiryDate!.year}')),
                                       TextButton(onPressed: () => _pickDateForLine(idx, isManufacture: false), child: const Text('Seleccionar')),
-                                    ])
+                                    ]),
                                   ]),
                                 ),
                               );
@@ -475,29 +481,41 @@ class _IngresoFormPageState extends State<IngresoFormPage> {
                             ),
                           ),
                           const SizedBox(width: 12),
-                          SizedBox(
-                              width: 200,
-                              child: TextFormField(controller: invoiceCtrl, decoration: const InputDecoration(labelText: 'N° factura/serie'))),
+                          SizedBox(width: 220, child: TextFormField(controller: invoiceCtrl, decoration: const InputDecoration(labelText: 'N° factura/serie'))),
                         ]),
-
                         const SizedBox(height: 8),
-
                         Row(children: [
                           Expanded(child: Text(purchaseDate == null ? 'Fecha de compra: —' : 'Compra: ${purchaseDate!.day}/${purchaseDate!.month}/${purchaseDate!.year}')),
-                          TextButton(onPressed: () async {
-                            final now = DateTime.now();
-                            final d = await showDatePicker(context: context, initialDate: purchaseDate ?? now, firstDate: DateTime(now.year - 5), lastDate: DateTime(now.year + 1));
-                            if (d != null) setState(() => purchaseDate = d);
-                          }, child: const Text('Seleccionar'))
+                          TextButton(
+                            onPressed: () async {
+                              final now = DateTime.now();
+                              final d = await showDatePicker(
+                                context: context,
+                                initialDate: purchaseDate ?? now,
+                                firstDate: DateTime(now.year - 5),
+                                lastDate: DateTime(now.year + 1),
+                              );
+                              if (d != null) setState(() => purchaseDate = d);
+                            },
+                            child: const Text('Seleccionar'),
+                          )
                         ]),
-
                         const SizedBox(height: 16),
 
-                        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                          Text('Total: ${total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          const SizedBox(width: 12),
-                          ElevatedButton(onPressed: _loading ? null : _save, style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white), child: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Text('Registrar compra'))
-                        ])
+                        // Total + botón
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Wrap(spacing: 12, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                            Text('Total: ${total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                            ElevatedButton(
+                              onPressed: _loading ? null : _save,
+                              style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
+                              child: _loading
+                                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                  : const Text('Registrar compra'),
+                            ),
+                          ]),
+                        ),
                       ]),
                     ),
                   ),
