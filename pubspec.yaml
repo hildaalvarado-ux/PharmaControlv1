@@ -40,6 +40,7 @@ dependencies:
   firebase_auth: ^6.1.0
   shared_preferences: ^2.5.3
   flutter_launcher_icons: ^0.14.4
+  url_launcher: ^6.1.10
 
 
 dev_dependencies:
@@ -73,7 +74,7 @@ flutter:
   - assets/oferta1.png
   - assets/oferta2.png
   - assets/oferta3.png
-  - assets/logo_uls.png
+
 
 
   # To add assets to your application, add an assets section, like this:

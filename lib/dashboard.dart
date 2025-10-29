@@ -9,6 +9,7 @@ import 'egreso_form.dart';
 import 'carrusel.dart';
 import 'proveedores.dart';
 import 'sobre_nosotros.dart';
+import 'preguntas_frecuentes.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -96,6 +97,7 @@ class _DashboardPageState extends State<DashboardPage> {
   void _openEgresos() => _selectPage(5);
   void _openProveedores() => _selectPage(6);
   void _openSobreNosotros() => _selectPage(7);
+  void _openPreguntasFrecuentes() => _selectPage(8);
 
   // ---- Menú Drawer
   Widget _buildMenuTile({required IconData icon, required String title, VoidCallback? onTap}) {
@@ -191,7 +193,9 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     actions.add(TextButton(onPressed: _openSobreNosotros, child: const Text("Sobre nosotros", style: TextStyle(color: Colors.white))));
+    actions.add(TextButton(onPressed: _openPreguntasFrecuentes, child: const Text("Preguntas frecuentes", style: TextStyle(color: Colors.white))));
     actions.add(IconButton(onPressed: _onSignOutPressed, icon: const Icon(Icons.logout, color: Colors.white)));
+    
     return actions;
   }
 
@@ -226,6 +230,8 @@ class _DashboardPageState extends State<DashboardPage> {
         return ProvidersManager();
       case 7:
         return const SobreNosotrosPage();
+      case 8:
+        return const PreguntasFrecuentesPage();
       default:
         return _pageOfertas();
     }
@@ -339,6 +345,7 @@ class _DashboardPageState extends State<DashboardPage> {
         const SizedBox(height: 8),
         const Divider(),
         _buildMenuTile(icon: Icons.info_outline, title: 'Sobre nosotros', onTap: _openSobreNosotros),
+        _buildMenuTile(icon: Icons.help_outline, title: 'Preguntas frecuentes', onTap: _openPreguntasFrecuentes),
         const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 12),
