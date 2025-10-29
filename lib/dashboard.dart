@@ -136,7 +136,7 @@ class _DashboardPageState extends State<DashboardPage> {
         const SizedBox(height: 8),
         _buildMenuTile(icon: Icons.local_offer, title: 'Ofertas', onTap: _openOfertas),
         _buildMenuTile(icon: Icons.production_quantity_limits, title: 'Gestionar productos', onTap: _openProductos),
-        _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar Egreso (Factura)', onTap: _openEgresos),
+        _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar venta (Factura)', onTap: _openEgresos),
       ],
     );
   }
@@ -148,7 +148,7 @@ class _DashboardPageState extends State<DashboardPage> {
         const Text('Panel Vendedor', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         _buildMenuTile(icon: Icons.local_offer, title: 'Ofertas', onTap: _openOfertas),
-        _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar Egreso (Factura)', onTap: _openEgresos),
+        _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar venta (Factura)', onTap: _openEgresos),
       ],
     );
   }
@@ -184,10 +184,10 @@ class _DashboardPageState extends State<DashboardPage> {
     } else if (role == 'farmaceutico' || role == 'farmacéutico') {
       actions.addAll([
         TextButton(onPressed: _openProductos, child: const Text("Productos", style: TextStyle(color: Colors.white))),
-        TextButton(onPressed: _openEgresos, child: const Text("Registrar Egreso", style: TextStyle(color: Colors.white))),
+        TextButton(onPressed: _openEgresos, child: const Text("Registrar venta", style: TextStyle(color: Colors.white))),
       ]);
     } else if (role == 'vendedor') {
-      actions.add(TextButton(onPressed: _openEgresos, child: const Text("Registrar Egreso", style: TextStyle(color: Colors.white))));
+      actions.add(TextButton(onPressed: _openEgresos, child: const Text("Registrar venta", style: TextStyle(color: Colors.white))));
     }
 
     actions.add(TextButton(onPressed: _openSobreNosotros, child: const Text("Sobre nosotros", style: TextStyle(color: Colors.white))));

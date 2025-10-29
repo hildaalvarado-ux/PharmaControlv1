@@ -73,7 +73,7 @@ class MyApp extends StatelessWidget {
         '/register_vendedor': (context) => const RegisterVendedorPage(),
         '/dashboard': (context) => const DashboardPage(),
         '/ingresos': (context) => const IngresoFormWidget(),
-        '/egresos': (context) => const EgresoFormWidget(userRole: 'admin'),
+        '/egresos': (context) => const EgresoFormWidget(),
       },
     );
   }
