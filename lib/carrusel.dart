@@ -18,6 +18,9 @@ class _HomeCarouselState extends State<HomeCarousel> {
 
   String? _currentRole; // 'admin' | 'farmaceutico' | 'vendedor' | null
 
+  // Stock mínimo permitido para crear/editar una promoción (mayor a 10 -> 11)
+  static const int _minStockForPromotion = 11;
+
   final List<String> _images = const [
     'assets/oferta1.png',
     'assets/oferta2.png',
@@ -97,9 +100,22 @@ class _HomeCarouselState extends State<HomeCarousel> {
     return r == 'admin' || r == 'farmaceutico' || r == 'vendedor';
   }
 
-  Future<void> _showAddOrEditPromotionDialog({DocumentSnapshot? editingPromotion, String? preselectedProductId}) async {
-    final productosSnap = await FirebaseFirestore.instance.collection('products').orderBy('name').get();
-    final productos = productosSnap.docs;
+  Future<void> _showAddOrEditPromotionDialog({
+    DocumentSnapshot? editingPromotion,
+    String? preselectedProductId,
+  }) async {
+    final productosSnap =
+        await FirebaseFirestore.instance.collection('products').orderBy('name').get();
+    final allProductos = productosSnap.docs;
+
+    // Filtrar SOLO productos con stock > 10 (>= 11)
+    final productosElegibles = allProductos.where((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      final stock = (data['stock'] is int)
+          ? (data['stock'] as int)
+          : int.tryParse((data['stock'] ?? '0').toString()) ?? 0;
+      return stock >= _minStockForPromotion; // >= 11
+    }).toList();
 
     String? selectedProductId = preselectedProductId;
     double? price;
@@ -115,9 +131,23 @@ class _HomeCarouselState extends State<HomeCarousel> {
       fechaFin = (data['endDate'] as Timestamp?)?.toDate();
 
       if (selectedProductId != null) {
-        final pdoc = await FirebaseFirestore.instance.collection('products').doc(selectedProductId).get();
+        final pdoc =
+            await FirebaseFirestore.instance.collection('products').doc(selectedProductId).get();
         if (pdoc.exists) price = ((pdoc.data()?['price'] ?? 0) as num).toDouble();
       }
+    }
+
+    // Si viene preseleccionado pero NO es elegible, bloquear
+    if (selectedProductId != null &&
+        !productosElegibles.any((d) => d.id == selectedProductId)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Este producto no es elegible para promoción (stock debe ser > 10).'),
+          ),
+        );
+      }
+      selectedProductId = null;
     }
 
     if (!mounted) return;
@@ -131,25 +161,34 @@ class _HomeCarouselState extends State<HomeCarousel> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (productos.isEmpty)
+                  if (productosElegibles.isEmpty)
                     const Padding(
                       padding: EdgeInsets.symmetric(vertical: 8.0),
-                      child: Text('No hay productos disponibles.'),
+                      child: Text('No hay productos elegibles (stock debe ser > 10).'),
                     ),
-                  if (productos.isNotEmpty)
+                  if (productosElegibles.isNotEmpty)
                     DropdownButtonFormField<String>(
-                      value: selectedProductId,
+                      value: productosElegibles.any((d) => d.id == selectedProductId)
+                          ? selectedProductId
+                          : null,
                       decoration: const InputDecoration(labelText: 'Producto'),
-                      items: productos.map((doc) {
+                      items: productosElegibles.map((doc) {
+                        final data = doc.data() as Map<String, dynamic>;
+                        final stock = (data['stock'] is int)
+                            ? (data['stock'] as int)
+                            : int.tryParse((data['stock'] ?? '0').toString()) ?? 0;
                         return DropdownMenuItem(
                           value: doc.id,
-                          child: Text(doc['name'] ?? 'Sin nombre'),
+                          child: Text('${data['name'] ?? "Sin nombre"}  (Stock: $stock)'),
                         );
                       }).toList(),
                       onChanged: (value) async {
                         selectedProductId = value;
                         if (value != null) {
-                          final prod = await FirebaseFirestore.instance.collection('products').doc(value).get();
+                          final prod = await FirebaseFirestore.instance
+                              .collection('products')
+                              .doc(value)
+                              .get();
                           setLocal(() => price = ((prod.data()?['price'] ?? 0) as num).toDouble());
                         } else {
                           setLocal(() => price = null);
@@ -170,7 +209,9 @@ class _HomeCarouselState extends State<HomeCarousel> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(fechaInicio == null ? 'Inicio: —' : 'Inicio: ${_fmtDate(fechaInicio!)}'),
+                        child: Text(fechaInicio == null
+                            ? 'Inicio: —'
+                            : 'Inicio: ${_fmtDate(fechaInicio!)}'),
                       ),
                       IconButton(
                         icon: const Icon(Icons.calendar_today),
@@ -189,7 +230,8 @@ class _HomeCarouselState extends State<HomeCarousel> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(fechaFin == null ? 'Fin: —' : 'Fin: ${_fmtDate(fechaFin!)}'),
+                        child:
+                            Text(fechaFin == null ? 'Fin: —' : 'Fin: ${_fmtDate(fechaFin!)}'),
                       ),
                       IconButton(
                         icon: const Icon(Icons.calendar_month),
@@ -213,10 +255,37 @@ class _HomeCarouselState extends State<HomeCarousel> {
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                 onPressed: () async {
-                  if (selectedProductId == null || descuentoCtrl.text.trim().isEmpty || fechaInicio == null || fechaFin == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Complete todos los campos')));
+                  if (selectedProductId == null ||
+                      descuentoCtrl.text.trim().isEmpty ||
+                      fechaInicio == null ||
+                      fechaFin == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Complete todos los campos')));
                     return;
                   }
+
+                  // Validar en tiempo real que el producto siga cumpliendo stock > 10
+                  final prodRef = FirebaseFirestore.instance
+                      .collection('products')
+                      .doc(selectedProductId);
+                  final prodDoc = await prodRef.get();
+                  if (!prodDoc.exists) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Producto no encontrado')),
+                    );
+                    return;
+                  }
+                  final pdata = prodDoc.data() as Map<String, dynamic>;
+                  final stock = (pdata['stock'] is int)
+                      ? (pdata['stock'] as int)
+                      : int.tryParse((pdata['stock'] ?? '0').toString()) ?? 0;
+                  if (stock < _minStockForPromotion) {
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content:
+                            Text('No se puede guardar. El stock debe ser mayor a 10.')));
+                    return;
+                  }
+
                   final payload = {
                     'productId': selectedProductId,
                     'discount': double.tryParse(descuentoCtrl.text.trim()) ?? 0.0,
@@ -227,7 +296,10 @@ class _HomeCarouselState extends State<HomeCarousel> {
                   if (editingPromotion == null) {
                     await FirebaseFirestore.instance.collection('promotions').add(payload);
                   } else {
-                    await FirebaseFirestore.instance.collection('promotions').doc(editingPromotion.id).update(payload);
+                    await FirebaseFirestore.instance
+                        .collection('promotions')
+                        .doc(editingPromotion.id)
+                        .update(payload);
                   }
                   if (mounted) Navigator.pop(context);
                 },
@@ -261,21 +333,35 @@ class _HomeCarouselState extends State<HomeCarousel> {
     }
   }
 
-  void _sendToEgreso(Map<String, dynamic> productData) {
-    try {
-      Navigator.pushNamed(context, '/egreso', arguments: {
-        'productId': productData['id'],
-        'name': productData['name'],
-        'price': productData['price'],
-      });
-    } catch (_) {
+  /// Navega al formulario de egreso. Intenta '/egreso' y luego '/egresos'.
+  Future<void> _sendToEgreso(Map<String, dynamic> productData) async {
+    final routes = const ['/egreso', '/egresos'];
+    for (final r in routes) {
+      try {
+        await Navigator.pushNamed(context, r, arguments: {
+          'productId': productData['id'],
+          'name': productData['name'],
+          'price': productData['price'],
+          'from': 'carousel',
+        });
+        return; // si navega con éxito, salimos
+      } catch (_) {
+        // Intentar la siguiente ruta
+      }
+    }
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo abrir el formulario de egreso. Verifica la ruta /egreso')),
+        const SnackBar(
+          content: Text(
+            'No se pudo abrir el formulario de egreso. Verifica que exista la ruta /egreso o /egresos.',
+          ),
+        ),
       );
     }
   }
 
-  static String _fmtDate(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  static String _fmtDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
   // --- UI ----
   @override
@@ -306,19 +392,35 @@ class _HomeCarouselState extends State<HomeCarousel> {
                         );
                       },
                     ),
-                    Positioned(left: 10, child: IconButton(icon: const Icon(Icons.arrow_back_ios, color: Colors.white), onPressed: _goToPrevious)),
-                    Positioned(right: 10, child: IconButton(icon: const Icon(Icons.arrow_forward_ios, color: Colors.white), onPressed: _goToNext)),
+                    Positioned(
+                      left: 10,
+                      child: IconButton(
+                        icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
+                        onPressed: _goToPrevious,
+                      ),
+                    ),
+                    Positioned(
+                      right: 10,
+                      child: IconButton(
+                        icon: const Icon(Icons.arrow_forward_ios, color: Colors.white),
+                        onPressed: _goToNext,
+                      ),
+                    ),
                   ],
                 ),
               ),
 
               const SizedBox(height: 12),
-              const Text('Ofertas (Próximos a vencer)', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const Text('Ofertas (Próximos a vencer)',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
 
               // Grid: Productos próximos a vencer (<= 90 días)
               StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('products').orderBy('expiryDate').snapshots(),
+                stream: FirebaseFirestore.instance
+                    .collection('products')
+                    .orderBy('expiryDate')
+                    .snapshots(),
                 builder: (context, snapshot) {
                   if (snapshot.hasError) {
                     return const Padding(
@@ -350,7 +452,7 @@ class _HomeCarouselState extends State<HomeCarousel> {
 
                   return _ResponsiveGrid.builder(
                     itemCount: filtered.length,
-                    minTileWidth: 280, // <- define el ancho mínimo de cada card
+                    minTileWidth: 280,
                     itemBuilder: (context, index) {
                       final doc = filtered[index];
                       final data = doc.data() as Map<String, dynamic>;
@@ -387,15 +489,20 @@ class _HomeCarouselState extends State<HomeCarousel> {
               ),
 
               const SizedBox(height: 20),
-              const Text('Promociones guardadas', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+              const Text('Promociones guardadas',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
               const SizedBox(height: 12),
 
               // Grid: Promociones guardadas
               StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance.collection('promotions').orderBy('createdAt', descending: true).snapshots(),
+                stream: FirebaseFirestore.instance
+                    .collection('promotions')
+                    .orderBy('createdAt', descending: true)
+                    .snapshots(),
                 builder: (context, snapPromos) {
                   if (snapPromos.hasError) {
-                    return const Padding(padding: EdgeInsets.all(12), child: Text('Error al cargar promociones.'));
+                    return const Padding(
+                        padding: EdgeInsets.all(12), child: Text('Error al cargar promociones.'));
                   }
                   if (!snapPromos.hasData) {
                     return const Padding(
@@ -406,7 +513,8 @@ class _HomeCarouselState extends State<HomeCarousel> {
 
                   final promos = snapPromos.data!.docs;
                   if (promos.isEmpty) {
-                    return const Padding(padding: EdgeInsets.all(12), child: Text('No hay promociones guardadas.'));
+                    return const Padding(
+                        padding: EdgeInsets.all(12), child: Text('No hay promociones guardadas.'));
                   }
 
                   return _ResponsiveGrid.builder(
@@ -428,7 +536,10 @@ class _HomeCarouselState extends State<HomeCarousel> {
                           if (prodSnap.connectionState == ConnectionState.waiting) {
                             return const Card(
                               elevation: 2,
-                              child: Center(child: Padding(padding: EdgeInsets.all(16), child: CircularProgressIndicator())),
+                              child: Center(
+                                  child: Padding(
+                                      padding: EdgeInsets.all(16),
+                                      child: CircularProgressIndicator())),
                             );
                           }
                           if (prodSnap.data == null || !(prodSnap.data!.exists)) {
@@ -447,7 +558,8 @@ class _HomeCarouselState extends State<HomeCarousel> {
                               ? (prodData['stock'] as int)
                               : int.tryParse((prodData['stock'] ?? '0').toString()) ?? 0;
                           final outOfStock = stock <= 0;
-                          final discountedPrice = (prodPrice * (1 - discount / 100)).toStringAsFixed(2);
+                          final discountedPrice =
+                              (prodPrice * (1 - discount / 100)).toStringAsFixed(2);
 
                           return _ProductCard(
                             leadingIcon: Icons.local_offer,
@@ -505,13 +617,35 @@ class _HomeCarouselState extends State<HomeCarousel> {
   }) {
     final actions = <Widget>[];
 
-    // Vendedor: solo egreso (si hay stock)
-    // Admin/Farmaceutico: editar/eliminar + egreso (si hay stock)
+    // Admin/Farmacéutico: crear/editar/eliminar promoción (solo si stock > 10)
     if (allowPromoActions) {
       actions.addAll([
         IconButton(
           tooltip: promoDoc == null ? 'Crear/Editar promoción' : 'Editar promoción',
           onPressed: () async {
+            // Validar stock antes de abrir el diálogo
+            final pdoc = await FirebaseFirestore.instance.collection('products').doc(productId).get();
+            if (!pdoc.exists) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Producto no encontrado')),
+                );
+              }
+              return;
+            }
+            final pdata = pdoc.data() as Map<String, dynamic>;
+            final stock = (pdata['stock'] is int)
+                ? (pdata['stock'] as int)
+                : int.tryParse((pdata['stock'] ?? '0').toString()) ?? 0;
+
+            if (stock < _minStockForPromotion) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                    content: Text('No se puede crear/editar promoción: stock debe ser > 10.')));
+              }
+              return;
+            }
+
             if (promoDoc != null) {
               await _showAddOrEditPromotionDialog(editingPromotion: promoDoc);
             } else {
@@ -557,10 +691,11 @@ class _HomeCarouselState extends State<HomeCarousel> {
       ]);
     }
 
+    // Comprar -> manda al formulario de egreso (si hay stock)
     if (_canSendToEgreso) {
       actions.add(
         IconButton(
-          tooltip: outOfStock ? 'Sin stock' : 'Mandar a egreso',
+          tooltip: outOfStock ? 'Sin stock' : 'Comprar (Egreso)',
           onPressed: outOfStock
               ? null
               : () => _sendToEgreso({'id': productId, 'name': productName, 'price': price}),
@@ -610,15 +745,21 @@ class _ProductCard extends StatelessWidget {
             const SizedBox(height: 2),
             Icon(leadingIcon, size: 40, color: Colors.green),
             const SizedBox(height: 6),
-            Text(title, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+            Text(title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
             if (subtitleTop != null) ...[
               const SizedBox(height: 6),
               Text(subtitleTop!, style: const TextStyle(fontSize: 12), textAlign: TextAlign.center),
             ],
             const SizedBox(height: 6),
-            Center(child: Text(discountText, style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold))),
+            Center(
+                child: Text(discountText,
+                    style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold))),
             const SizedBox(height: 4),
-            Center(child: Text(priceText, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 15))),
+            Center(
+                child: Text(priceText,
+                    style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 15))),
             const SizedBox(height: 8),
             Center(
               child: Text(
@@ -654,7 +795,8 @@ class _ProductCard extends StatelessWidget {
               color: Colors.red.shade600,
               borderRadius: BorderRadius.circular(6),
             ),
-            child: const Text('SIN STOCK', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+            child: const Text('SIN STOCK',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
           ),
         ),
       ],
