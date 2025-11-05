@@ -205,12 +205,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _pageProductos() => const AdminProductManager();
   Widget _pageMovimientos() => const MovementsManager();
   Widget _pageInventario() => Center(child: Text('Inventario (rol: ${_roleNorm()})'));
-  Widget _pageEgresos() {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
-      child: SingleChildScrollView(child: EgresoFormWidget(userRole: _roleNorm())),
-    );
-  }
+  Widget _pageEgresos() => EgresoFormWidget(userRole: _roleNorm());
 
   Widget _cardContentByIndex() {
     switch (_selectedIndex) {
@@ -237,19 +232,19 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  // ---- AppBar title: SOLO texto (quitamos logo al lado de “PharmaControl”)
+  // ---- AppBar title: SOLO texto
   Widget _buildAppBarTitle(bool isMobile) {
     return const Text("PharmaControl", style: TextStyle(color: Colors.white));
   }
 
-  // ---- Encabezado responsive con logo grande a la derecha
+  // ---- Encabezado responsive
   Widget _headerResponsive(bool isMobile) {
     final logo = Container(
       height: isMobile ? 48 : 72,
       width: isMobile ? 48 : 72,
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
-        color: isMobile ? Colors.white : Colors.white, // fondo claro para contraste en móvil
+        color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
@@ -270,7 +265,7 @@ class _DashboardPageState extends State<DashboardPage> {
       width: double.infinity,
       padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: isMobile ? 12 : 16),
       decoration: BoxDecoration(
-        color: kGreen1.withOpacity(0.12), // bloque verde más visible
+        color: kGreen1.withOpacity(0.12),
         borderRadius: BorderRadius.circular(12),
       ),
       child: isMobile
@@ -284,7 +279,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
                     textAlign: TextAlign.center, style: const TextStyle(fontSize: 14)),
                 const SizedBox(height: 10),
-                logo, // logo bajo el texto con fondo visible
+                logo,
               ],
             )
           : Row(
@@ -300,7 +295,6 @@ class _DashboardPageState extends State<DashboardPage> {
                     ],
                   ),
                 ),
-                // Logo a la derecha (donde marcaste la “L”)
                 logo,
               ],
             ),
@@ -312,7 +306,6 @@ class _DashboardPageState extends State<DashboardPage> {
     return ListView(
       padding: EdgeInsets.zero,
       children: [
-        // Header más compacto para evitar overflow
         Container(
           padding: const EdgeInsets.fromLTRB(16, 28, 16, 16),
           decoration: BoxDecoration(color: kGreen1),
@@ -327,7 +320,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 width: 56,
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: Colors.white, // contraste en móvil
+                  color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Image.asset('assets/logo.png', fit: BoxFit.contain,
@@ -368,6 +361,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     final bool isMobile = MediaQuery.of(context).size.width < 800;
     final double screenHeight = MediaQuery.of(context).size.height;
+    final bool isEgresos = _selectedIndex == 5;
 
     return WillPopScope(
       onWillPop: () async => false,
@@ -376,7 +370,7 @@ class _DashboardPageState extends State<DashboardPage> {
           backgroundColor: kGreen1,
           iconTheme: const IconThemeData(color: Colors.white),
           automaticallyImplyLeading: isMobile,
-          title: _buildAppBarTitle(isMobile), // solo texto, sin logo al lado
+          title: _buildAppBarTitle(isMobile),
           actions: isMobile ? [] : _actionsForRole(),
         ),
         drawer: isMobile ? Drawer(child: _buildDrawerContents(isMobile)) : null,
@@ -387,29 +381,30 @@ class _DashboardPageState extends State<DashboardPage> {
           child: SafeArea(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _headerResponsive(isMobile), // bloque de bienvenida mejorado
-                        const SizedBox(height: 18),
-
-                        // Card de contenido
-                        Card(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          elevation: 3,
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: _cardContentByIndex(),
-                          ),
+                : isEgresos
+                    // Egresos a pantalla completa (sin Scroll/Card externos)
+                    ? _pageEgresos()
+                    // Resto de secciones como antes
+                    : SingleChildScrollView(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _headerResponsive(isMobile),
+                            const SizedBox(height: 18),
+                            Card(
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              elevation: 3,
+                              child: Padding(
+                                padding: const EdgeInsets.all(16),
+                                child: _cardContentByIndex(),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                  ),
+                      ),
           ),
         ),
-        // Botón flotante de Ofertas en móvil (acceso rápido)
-        floatingActionButton: isMobile
+        floatingActionButton: isMobile && !isEgresos
             ? FloatingActionButton.extended(
                 heroTag: 'fabOfertas',
                 backgroundColor: kGreen2,
