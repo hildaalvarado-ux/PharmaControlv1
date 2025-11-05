@@ -1,8 +1,8 @@
 // lib/movements_manager.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-
+import 'ingreso_form.dart';
+import 'egreso_form.dart';
 /// Colección principal usada por tu app para productos
 /// ya existe como 'products'. Aquí agregamos 'movements'.
 ///
@@ -17,18 +17,7 @@ import 'package:flutter/material.dart';
 ///   counterpartyName: String?,
 ///   totalItems: int,
 ///   totalAmount: double,
-///   items: [
-///     {
-///       productId: String,
-///       productName: String,
-///       sku: String,
-///       qty: int,
-///       unitPrice: double, // precio al momento del movimiento
-///       subtotal: double,
-///       stockBefore: int,
-///       stockAfter: int
-///     }, ...
-///   ]
+///   items: [ ... ]
 /// }
 
 class MovementsManager extends StatefulWidget {
@@ -42,10 +31,9 @@ enum _View { all, ingresos, egresos }
 
 class _MovementsManagerState extends State<MovementsManager> {
   final _movementsRef = FirebaseFirestore.instance.collection('movements');
-  final _productsRef = FirebaseFirestore.instance.collection('products');
 
   _View _view = _View.all;
-  bool _busy = false;
+  bool _busy = false; // Conservado (no se usa para formularios aquí)
 
   // Filtro rápido por rango de fechas (opcional)
   DateTime? _from;
@@ -72,7 +60,6 @@ class _MovementsManagerState extends State<MovementsManager> {
       q = q.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_from!));
     }
     if (_to != null) {
-      // incluir todo el día de _to
       final toEnd = DateTime(_to!.year, _to!.month, _to!.day, 23, 59, 59, 999);
       q = q.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(toEnd));
     }
@@ -94,282 +81,6 @@ class _MovementsManagerState extends State<MovementsManager> {
         _from = res.start;
         _to = res.end;
       });
-    }
-  }
-
-  // --- CREAR MOVIMIENTO ---
-  Future<void> _showNewMovementSheet(String type) async {
-    assert(type == 'ingreso' || type == 'egreso');
-
-    final items = <_MovementItemDraft>[];
-    final noteCtrl = TextEditingController();
-    final counterpartyCtrl = TextEditingController();
-
-    // Cargamos productos una sola vez para el picker
-    final productsSnap = await _productsRef.orderBy('name').get();
-    final products = productsSnap.docs.map((d) {
-      final data = d.data() as Map<String, dynamic>;
-      return _ProductOption(
-        id: d.id,
-        name: (data['name'] ?? '') as String,
-        sku: (data['sku'] ?? '') as String,
-        price: ((data['price'] ?? 0) as num).toDouble(),
-        stock: (data['stock'] ?? 0) is int ? data['stock'] as int : int.tryParse('${data['stock']}') ?? 0,
-      );
-    }).toList();
-
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (c) => StatefulBuilder(
-        builder: (c, setSheet) {
-          Future<void> addItem() async {
-            _ProductOption? selected;
-            final qtyCtrl = TextEditingController(text: '1');
-            final priceCtrl = TextEditingController();
-
-            final ok = await showDialog<bool>(
-              context: context,
-              builder: (cx) {
-                return AlertDialog(
-                  title: Text(type == 'ingreso' ? 'Agregar línea (Venta)' : 'Agregar línea (Compra)'),
-                  content: SizedBox(
-                    width: 500,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        DropdownButtonFormField<_ProductOption>(
-                          value: selected,
-                          isExpanded: true,
-                          items: products
-                              .map((p) => DropdownMenuItem(value: p, child: Text('${p.name}  (SKU: ${p.sku})  • Stock: ${p.stock}')))
-                              .toList(),
-                          onChanged: (v) {
-                            selected = v;
-                            priceCtrl.text = v?.price.toStringAsFixed(2) ?? '';
-                          },
-                          decoration: const InputDecoration(labelText: 'Producto'),
-                          validator: (v) => v == null ? 'Seleccione producto' : null,
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: qtyCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(),
-                          decoration: const InputDecoration(labelText: 'Cantidad'),
-                        ),
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: priceCtrl,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: InputDecoration(
-                            labelText: type == 'ingreso' ? 'Precio de venta (unidad)' : 'Precio de compra (unidad)',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(cx, false), child: const Text('Cancelar')),
-                    ElevatedButton(onPressed: () => Navigator.pop(cx, true), child: const Text('Agregar')),
-                  ],
-                );
-              },
-            );
-
-            if (ok == true && selected != null) {
-              final qty = int.tryParse(qtyCtrl.text) ?? 0;
-              final price = double.tryParse(priceCtrl.text.replaceAll(',', '.')) ?? selected!.price;
-              if (qty <= 0) {
-                _snack('Cantidad inválida');
-                return;
-              }
-              setSheet(() {
-                items.add(_MovementItemDraft(
-                  product: selected!,
-                  qty: qty,
-                  unitPrice: price,
-                ));
-              });
-            }
-          }
-
-          double total = 0;
-          for (final it in items) {
-            total += it.qty * it.unitPrice;
-          }
-
-          return Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-              top: 12,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      type == 'ingreso' ? 'Nuevo Ingreso (Venta)' : 'Nuevo Egreso (Compra)',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    FilledButton.icon(
-                      onPressed: addItem,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Agregar línea'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                if (items.isEmpty)
-                  const Text('Sin líneas. Agrega una para continuar.')
-                else
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 300),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: items.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) {
-                        final it = items[i];
-                        return ListTile(
-                          title: Text('${it.product.name} (SKU: ${it.product.sku})'),
-                          subtitle: Text('Cant: ${it.qty} • P. unidad: ${it.unitPrice.toStringAsFixed(2)}'),
-                          trailing: Text('Subtotal: ${(it.qty * it.unitPrice).toStringAsFixed(2)}'),
-                          leading: IconButton(
-                            onPressed: () => setSheet(() => items.removeAt(i)),
-                            icon: const Icon(Icons.delete, color: Colors.redAccent),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: counterpartyCtrl,
-                  decoration: InputDecoration(
-                    labelText: type == 'ingreso' ? 'Cliente (opcional)' : 'Proveedor (opcional)',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: noteCtrl,
-                  decoration: const InputDecoration(labelText: 'Nota (opcional)'),
-                  maxLines: 2,
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Total: ${total.toStringAsFixed(2)}',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                      ),
-                    ),
-                    FilledButton.icon(
-                      onPressed: items.isEmpty ? null : () async {
-                        Navigator.of(context).pop();
-                        await _commitMovement(type: type, items: items, note: noteCtrl.text.trim(), counterpartyName: counterpartyCtrl.text.trim());
-                      },
-                      icon: const Icon(Icons.save),
-                      label: const Text('Guardar'),
-                    )
-                  ],
-                )
-              ],
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  Future<void> _commitMovement({
-    required String type, // 'ingreso' o 'egreso'
-    required List<_MovementItemDraft> items,
-    String? note,
-    String? counterpartyName,
-  }) async {
-    setState(() => _busy = true);
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      final uid = user?.uid ?? 'unknown';
-      final uname = (user?.displayName?.trim().isNotEmpty == true)
-          ? user!.displayName!
-          : (user?.email ?? 'Usuario');
-
-      await FirebaseFirestore.instance.runTransaction((tx) async {
-        final movementItems = <Map<String, dynamic>>[];
-        double total = 0;
-
-        for (final draft in items) {
-          final prodRef = _productsRef.doc(draft.product.id);
-          final prodSnap = await tx.get(prodRef);
-          if (!prodSnap.exists) {
-            throw Exception('Producto no encontrado: ${draft.product.name}');
-          }
-          final pData = prodSnap.data() as Map<String, dynamic>;
-          final currentStock = (pData['stock'] ?? 0) is int
-              ? pData['stock'] as int
-              : int.tryParse('${pData['stock']}') ?? 0;
-
-          // Calcular nuevo stock según el tipo
-          int newStock = currentStock;
-          if (type == 'ingreso') {
-            // Venta = sale -> disminuye stock
-            if (draft.qty > currentStock) {
-              throw Exception('Stock insuficiente para ${draft.product.name} (disponible: $currentStock)');
-            }
-            newStock = currentStock - draft.qty;
-          } else {
-            // Egreso = compra -> aumenta stock
-            newStock = currentStock + draft.qty;
-          }
-
-          tx.update(prodRef, {
-            'stock': newStock,
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
-
-          final lineSubtotal = draft.qty * draft.unitPrice;
-          total += lineSubtotal;
-
-          movementItems.add({
-            'productId': draft.product.id,
-            'productName': draft.product.name,
-            'sku': draft.product.sku,
-            'qty': draft.qty,
-            'unitPrice': draft.unitPrice,
-            'subtotal': lineSubtotal,
-            'stockBefore': currentStock,
-            'stockAfter': newStock,
-          });
-        }
-
-        final movRef = _movementsRef.doc();
-        tx.set(movRef, {
-          'type': type,
-          'createdAt': FieldValue.serverTimestamp(),
-          'createdByUid': uid,
-          'createdByName': uname,
-          'note': (note ?? '').isEmpty ? null : note,
-          'counterpartyType': type == 'ingreso' ? 'cliente' : 'proveedor',
-          'counterpartyName': (counterpartyName ?? '').isEmpty ? null : counterpartyName,
-          'totalItems': items.length,
-          'totalAmount': total,
-          'items': movementItems,
-        });
-      });
-
-      _snack('Movimiento guardado y stock actualizado.');
-    } catch (e) {
-      _snack('Error: $e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
     }
   }
 
@@ -415,17 +126,28 @@ class _MovementsManagerState extends State<MovementsManager> {
                 icon: const Icon(Icons.clear),
               ),
             const SizedBox(width: 12),
+
+            // ---------- SOLO CAMBIOS AQUÍ: botones que NAVEGAN ----------
             FilledButton.icon(
-              onPressed: () => _showNewMovementSheet('ingreso'),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const IngresoFormWidget()),
+                );
+              },
               icon: const Icon(Icons.add_shopping_cart),
               label: const Text('Nuevo ingreso'),
             ),
             const SizedBox(width: 8),
             FilledButton.icon(
-              onPressed: () => _showNewMovementSheet('egreso'),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const EgresoFormWidget()),
+                );
+              },
               icon: const Icon(Icons.move_to_inbox),
               label: const Text('Nuevo egreso'),
             ),
+            // -----------------------------------------------------------
           ],
         ),
         const SizedBox(height: 12),
@@ -561,21 +283,4 @@ class _MovementsManagerState extends State<MovementsManager> {
       ],
     );
   }
-}
-
-// --- Helpers ---
-class _ProductOption {
-  final String id;
-  final String name;
-  final String sku;
-  final double price;
-  final int stock;
-  _ProductOption({required this.id, required this.name, required this.sku, required this.price, required this.stock});
-}
-
-class _MovementItemDraft {
-  final _ProductOption product;
-  final int qty;
-  final double unitPrice;
-  _MovementItemDraft({required this.product, required this.qty, required this.unitPrice});
 }
