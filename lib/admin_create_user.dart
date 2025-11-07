@@ -16,7 +16,7 @@ class _AdminUserManagerState extends State<AdminUserManager> {
   final CollectionReference usersRef = FirebaseFirestore.instance.collection('users');
   bool _loadingAction = false;
 
-  // Roles disponibles (si quieres agregar más, actualiza aquí)
+  // Roles disponibles
   final List<String> _roles = ['admin', 'farmaceutico', 'vendedor'];
 
   // --- Utilidades ---
@@ -73,9 +73,8 @@ class _AdminUserManagerState extends State<AdminUserManager> {
     return controller.text.trim().isEmpty ? null : controller.text.trim();
   }
 
-  // --- CRUD sobre Firestore (no modifica FirebaseAuth) ---
+  // CRUD Firestore (solo documentos, no Auth)
   Future<void> _createUserFirestore(Map<String, dynamic> data) async {
-    // crea doc con id autogenerado o puedes usar un uid si lo tienes
     await usersRef.add({
       'name': data['name'],
       'usuario': data['usuario'],
@@ -98,7 +97,7 @@ class _AdminUserManagerState extends State<AdminUserManager> {
     await usersRef.doc(uid).delete();
   }
 
-  // --- Dialogos: crear / editar ---
+  // Diálogos crear / editar
   Future<void> _showCreateUserDialog() async {
     final _formKey = GlobalKey<FormState>();
     final nameCtrl = TextEditingController();
@@ -144,7 +143,6 @@ class _AdminUserManagerState extends State<AdminUserManager> {
 
     if (created != true) return;
 
-    // Si asigna rol admin: pedir contraseña del admin para reauth
     if (role == 'admin') {
       final pass = await _askForPassword(hint: 'Confirma tu contraseña para asignar rol admin');
       if (pass == null) {
@@ -166,7 +164,7 @@ class _AdminUserManagerState extends State<AdminUserManager> {
         'email': emailCtrl.text.trim(),
         'role': role,
       });
-      _showSnack('Usuario creado (Firestore). Si quieres crear la cuenta en Auth, despliega una Cloud Function admin.');
+      _showSnack('Usuario creado (Firestore). Para crear cuenta en Auth usa Cloud Functions con privilegios.');
     } catch (e) {
       _showSnack('Error: $e');
     } finally {
@@ -217,7 +215,6 @@ class _AdminUserManagerState extends State<AdminUserManager> {
 
     if (saved != true) return;
 
-    // Si cambia rol a admin o desde admin -> pedir reauth
     final oldRole = (data['role'] ?? '') as String;
     if (oldRole != role && (role == 'admin' || oldRole == 'admin')) {
       final pass = await _askForPassword(hint: 'Confirma tu contraseña para cambiar roles');
@@ -239,7 +236,7 @@ class _AdminUserManagerState extends State<AdminUserManager> {
         'usuario': userCtrl.text.trim(),
         'role': role,
       });
-      _showSnack('Usuario actualizado (Firestore). Para afectar Firebase Auth debes usar Cloud Functions.');
+      _showSnack('Usuario actualizado (Firestore). Para afectar Firebase Auth usa Cloud Functions.');
     } catch (e) {
       _showSnack('Error: $e');
     } finally {
@@ -290,23 +287,19 @@ class _AdminUserManagerState extends State<AdminUserManager> {
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Header y boton crear
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Gestión de usuarios', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kGreen1)),
-            ElevatedButton.icon(
-              onPressed: _showCreateUserDialog,
-              icon: const Icon(Icons.person_add),
-              label: const Text('Nuevo usuario'),
-              style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
-            ),
-          ],
+        // ✅ Título centrado
+        Center(
+          child: Text(
+            'Gestión de usuarios',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kGreen1),
+          ),
         ),
         const SizedBox(height: 12),
 
-        // StreamBuilder lista usuarios
+        // Lista de usuarios
         StreamBuilder<QuerySnapshot>(
           stream: usersRef.orderBy('createdAt', descending: true).snapshots(),
           builder: (context, snap) {
@@ -348,9 +341,9 @@ class _AdminUserManagerState extends State<AdminUserManager> {
                             if (action == 'edit') await _showEditUserDialog(d);
                             if (action == 'delete') await _tryDeleteUser(d, adminCount);
                           },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Editar'))),
-                            const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete), title: Text('Eliminar'))),
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Editar'))),
+                            PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete), title: Text('Eliminar'))),
                           ],
                         ),
                       ),
@@ -358,7 +351,7 @@ class _AdminUserManagerState extends State<AdminUserManager> {
                   },
                 );
               } else {
-                // Desktop: tabla
+                // Desktop
                 return SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
@@ -388,6 +381,24 @@ class _AdminUserManagerState extends State<AdminUserManager> {
             });
           },
         ),
+
+        // ✅ Botón centrado al final
+        const SizedBox(height: 16),
+        Center(
+          child: ElevatedButton.icon(
+            onPressed: _showCreateUserDialog,
+            icon: const Icon(Icons.person_add),
+            label: const Text('Nuevo usuario'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kGreen2,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ),
+
         if (_loadingAction) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
       ],
     );
