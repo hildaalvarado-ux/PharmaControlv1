@@ -205,7 +205,7 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _pageProductos() => const AdminProductManager();
   Widget _pageMovimientos() => const MovementsManager();
   Widget _pageInventario() => Center(child: Text('Inventario (rol: ${_roleNorm()})'));
-  Widget _pageEgresos() => EgresoFormWidget(userRole: _roleNorm());
+  Widget _pageEgresos() => EgresoFormWidget();
 
   Widget _cardContentByIndex() {
     switch (_selectedIndex) {

@@ -41,6 +41,8 @@ dependencies:
   shared_preferences: ^2.5.3
   flutter_launcher_icons: ^0.14.4
   url_launcher: ^6.1.10
+  pdf: ^3.10.8
+  printing: ^5.13.4
 
 
 dev_dependencies:

@@ -1,4 +1,3 @@
-// lib/admin_product_manager.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'app_theme.dart';
@@ -15,14 +14,19 @@ class _AdminProductManagerState extends State<AdminProductManager> {
   final CollectionReference providersRef = FirebaseFirestore.instance.collection('providers');
 
   bool _loadingAction = false;
-
-  // Lista de categorias extraidas de los productos (únicas)
   List<String> _categories = [];
+  Map<String, String> _providers = {}; // providerId -> displayName
+
+  // Hints desde BD (solo para futuro uso si quieres chips de sugerencias)
+  final Set<String> _hintStrengths = {};
+  final Set<String> _hintPresentations = {};
 
   @override
   void initState() {
     super.initState();
     _loadCategories();
+    _loadProviders();
+    _preloadHints();
   }
 
   Future<void> _loadCategories() async {
@@ -36,16 +40,41 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       }
       final list = set.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
       if (!mounted) return;
-      setState(() {
-        _categories = list;
-      });
-    } catch (e) {
-      // Si hay error, simplemente dejamos la lista vacía (no bloquear)
+      setState(() => _categories = list);
+    } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _categories = [];
-      });
+      setState(() => _categories = []);
     }
+  }
+
+  Future<void> _loadProviders() async {
+    try {
+      final snap = await providersRef.get();
+      final map = <String, String>{};
+      for (final d in snap.docs) {
+        final data = d.data() as Map<String, dynamic>;
+        map[d.id] = (data['name'] ?? data['displayName'] ?? 'Proveedor').toString();
+      }
+      if (!mounted) return;
+      setState(() => _providers = map);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _providers = {});
+    }
+  }
+
+  Future<void> _preloadHints() async {
+    try {
+      final snap = await productsRef.limit(500).get();
+      for (final d in snap.docs) {
+        final m = d.data() as Map<String, dynamic>;
+        final s = (m['strength'] ?? '').toString().trim();
+        final p = (m['presentation'] ?? '').toString().trim();
+        if (s.isNotEmpty) _hintStrengths.add(s);
+        if (p.isNotEmpty) _hintPresentations.add(p);
+      }
+      if (mounted) setState(() {});
+    } catch (_) {}
   }
 
   void _showSnack(String msg) {
@@ -61,13 +90,12 @@ class _AdminProductManagerState extends State<AdminProductManager> {
         content: Text(message),
         actions: [
           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Si')),
+          TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('Sí')),
         ],
       ),
     );
   }
 
-  // Genera un sku secuencial (empieza en 1001)
   Future<String> _generateNextSku() async {
     try {
       final q = await productsRef.orderBy('sku', descending: true).limit(1).get();
@@ -75,7 +103,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       final candidate = (q.docs.first.data() as Map<String, dynamic>)['sku']?.toString() ?? '';
       final n = int.tryParse(candidate);
       if (n == null) {
-        // Si el sku más alto no es numérico, fallback a buscar el mayor numérico entre todos
         final all = await productsRef.get();
         int maxN = 1000;
         for (final d in all.docs) {
@@ -92,42 +119,42 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     }
   }
 
-  // --- CRUD Firestore ---
+  // ===== CRUD Firestore =====
+
   Future<void> _createProductFirestore(Map<String, dynamic> data) async {
-    final Map<String, dynamic> map = {
-      'name': data['name'],
-      'sku': data['sku'],
-      'category': data['category'],
-      'description': data['description'] ?? '',
-      'purchasePrice': data['purchasePrice'],
-      'price': data['price'],
-      'marginPercent': data['marginPercent'] ?? 10,
-      'priceIsPerUnit': data['priceIsPerUnit'] ?? true,
-      'stock': data['stock'],
-      'providerId': data['providerId'],
-      'createdAt': FieldValue.serverTimestamp(),
-    };
-
-    if (data.containsKey('expiryDate') && data['expiryDate'] is DateTime) {
-      map['expiryDate'] = Timestamp.fromDate(data['expiryDate'] as DateTime);
-    }
-
+    final map = _toFirestoreMap(data, isCreate: true);
     await productsRef.add(map);
   }
 
   Future<void> _updateProductFirestore(String id, Map<String, dynamic> data) async {
-    final Map<String, dynamic> map = {
-      'name': data['name'],
-      'sku': data['sku'],
-      'category': data['category'],
-      'description': data['description'] ?? '',
-      'purchasePrice': data['purchasePrice'],
-      'price': data['price'],
-      'marginPercent': data['marginPercent'] ?? 10,
-      'priceIsPerUnit': data['priceIsPerUnit'] ?? true,
-      'stock': data['stock'],
-      'providerId': data['providerId'],
-      'updatedAt': FieldValue.serverTimestamp(),
+    final map = _toFirestoreMap(data, isCreate: false);
+    await productsRef.doc(id).update(map);
+  }
+
+  Map<String, dynamic> _toFirestoreMap(Map<String, dynamic> data, {required bool isCreate}) {
+    String nonNullStr(dynamic v) => (v ?? '').toString();
+
+    final map = <String, dynamic>{
+      'name': nonNullStr(data['name']),
+      'sku': nonNullStr(data['sku']),
+      'category': nonNullStr(data['category']),
+      'description': nonNullStr(data['description']),
+      'purchasePrice': _toNum(data['purchasePrice']), // sin IVA
+      'marginPercent': _toNum(data['marginPercent'] ?? 10),
+      'taxable': (data['taxable'] ?? false) == true,
+      'ivaPercent': _toNum(data['ivaPercent'] ?? 13),
+      'salePriceNet': _toNum(data['salePriceNet']), // sin IVA
+      'price': _toNum(data['price']), // con IVA (si taxable)
+      'priceIsPerUnit': (data['priceIsPerUnit'] ?? true) == true,
+      'stock': _toNum(data['stock']),
+      'providerId': data['providerId'], // puede ser null
+      'lot': nonNullStr(data['lot']),
+      'requiresPrescription': (data['requiresPrescription'] ?? false) == true,
+      'pharmForm': nonNullStr(data['pharmForm']),
+      'route': nonNullStr(data['route']),
+      'strength': nonNullStr(data['strength']),
+      'presentation': nonNullStr(data['presentation']),
+      'unitsPerPack': _toNum(data['unitsPerPack'] ?? 1),
     };
 
     if (data.containsKey('expiryDate')) {
@@ -139,542 +166,22 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       }
     }
 
-    await productsRef.doc(id).update(map);
+    map[isCreate ? 'createdAt' : 'updatedAt'] = FieldValue.serverTimestamp();
+    return map;
+  }
+
+  num _toNum(dynamic v) {
+    if (v == null) return 0;
+    if (v is num) return v;
+    return num.tryParse(v.toString().replaceAll(',', '.')) ?? 0;
   }
 
   Future<void> _deleteProductFirestore(String id) async {
     await productsRef.doc(id).delete();
   }
 
-  // Mostrar diálogo para agregar nueva categoría (reutilizable)
-  Future<String?> _showAddCategoryDialog({String initial = ''}) async {
-    final TextEditingController newCatCtrl = TextEditingController(text: initial);
-    final res = await showDialog<String?>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Nueva categoría'),
-        content: TextField(
-          controller: newCatCtrl,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'Nombre de la categoría'),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(c).pop(null), child: const Text('Cancelar')),
-          ElevatedButton(
-            onPressed: () {
-              final name = newCatCtrl.text.trim();
-              if (name.isNotEmpty) Navigator.of(c).pop(name);
-            },
-            child: const Text('Agregar'),
-          ),
-        ],
-      ),
-    );
+  // ===== Helpers =====
 
-    if (res != null && res.trim().isNotEmpty) {
-      // Agregamos en memoria y reordenamos
-      if (!_categories.contains(res.trim())) {
-        setState(() {
-          _categories.add(res.trim());
-          _categories.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-        });
-      }
-      return res.trim();
-    }
-    return null;
-  }
-
-  // --- Dialog: crear producto ---
-  Future<void> _showCreateProductDialog() async {
-    final _formKey = GlobalKey<FormState>();
-    final nameCtrl = TextEditingController();
-    final descriptionCtrl = TextEditingController();
-    final purchasePriceCtrl = TextEditingController(); // precio de compra
-    final priceCtrl = TextEditingController(); // precio de venta (calculado o editable)
-    final stockCtrl = TextEditingController(text: '0');
-    bool priceIsPerUnit = true;
-    bool manualPrice = false; // si true, el usuario editará price manualmente
-    double marginPercent = 10.0;
-    String? selectedProviderId;
-
-    // categoria: manejada con selectedCategory y no con TextEditingController
-    String? selectedCategory;
-
-    // --- expiry ---
-    DateTime? pickedExpiry;
-    // ---
-
-    // load providers for dropdown
-    final providersSnap = await providersRef.orderBy('name').get();
-    final providers = providersSnap.docs;
-
-    // generate sku
-    final nextSku = await _generateNextSku();
-    final skuCtrl = TextEditingController(text: nextSku);
-
-    final created = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(builder: (context, setState) {
-        void _recalcPriceFromPurchase() {
-          final p = double.tryParse(purchasePriceCtrl.text.replaceAll(',', '.')) ?? 0.0;
-          final calculated = (p * (1 + marginPercent / 100));
-          priceCtrl.text = calculated.toStringAsFixed(2);
-        }
-
-        return AlertDialog(
-          title: const Text('Crear producto'),
-          content: SingleChildScrollView(
-            child: Form(
-              key: _formKey,
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                TextFormField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nombre'), validator: (v) => v == null || v.trim().isEmpty ? 'Ingrese nombre' : null),
-                const SizedBox(height: 8),
-                // SKU es autogenerado, pero editable si quieres ajustar
-                TextFormField(controller: skuCtrl, decoration: const InputDecoration(labelText: 'SKU (id)'), validator: (v) => v == null || v.trim().isEmpty ? 'SKU requerido' : null),
-                const SizedBox(height: 8),
-
-                // --- Categoria: Dropdown + Boton Nueva categoria
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: selectedCategory,
-                        decoration: const InputDecoration(labelText: 'Categoría'),
-                        items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                        onChanged: (val) => setState(() => selectedCategory = val),
-                        validator: (val) => (val == null || val.trim().isEmpty) ? 'Seleccione o agregue una categoría' : null,
-                        isExpanded: true,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        final added = await _showAddCategoryDialog();
-                        if (added != null) {
-                          setState(() => selectedCategory = added);
-                        }
-                      },
-                      icon: const Icon(Icons.add),
-                      label: const Text('Nueva categoría'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-
-                TextFormField(controller: descriptionCtrl, decoration: const InputDecoration(labelText: 'Descripción (uso, indicación, presentaciones)'), maxLines: 2),
-                const SizedBox(height: 8),
-                // --- picker expiry ---
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(pickedExpiry == null ? 'Fecha de vencimiento: —' : 'Fecha de vencimiento: ${pickedExpiry!.day}/${pickedExpiry!.month}/${pickedExpiry!.year}'),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        final now = DateTime.now();
-                        final d = await showDatePicker(
-                          context: context,
-                          initialDate: pickedExpiry ?? now,
-                          firstDate: DateTime(now.year - 5),
-                          lastDate: DateTime(now.year + 10),
-                        );
-                        if (d != null) setState(() => pickedExpiry = d);
-                      },
-                      child: const Text('Seleccionar'),
-                    ),
-                    if (pickedExpiry != null)
-                      IconButton(
-                        onPressed: () => setState(() => pickedExpiry = null),
-                        icon: const Icon(Icons.clear),
-                        tooltip: 'Remover fecha',
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // Precio de compra (que usamos para calcular precio de venta)
-                TextFormField(
-                  controller: purchasePriceCtrl,
-                  keyboardType: TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Precio de compra (por unidad)'),
-                  onChanged: (_) {
-                    _recalcPriceFromPurchase();
-                    setState(() {});
-                  },
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Ingrese precio de compra';
-                    if (double.tryParse(v.replaceAll(',', '.')) == null) return 'Precio inválido';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 8),
-                // Margen (editable)
-                Row(children: [
-                  const Text('Margen %:'),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 80,
-                    child: TextFormField(
-                      initialValue: marginPercent.toString(),
-                      keyboardType: TextInputType.numberWithOptions(decimal: true),
-                      onChanged: (v) {
-                        marginPercent = double.tryParse(v.replaceAll(',', '.')) ?? 10.0;
-                        _recalcPriceFromPurchase();
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(child: Text('Precio de venta sugerido = compra × (1 + margen)')),
-                ]),
-                const SizedBox(height: 8),
-                // Precio de venta (calculado por defecto, editable si manualPrice true)
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: priceCtrl,
-                        enabled: manualPrice,
-                        keyboardType: TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(labelText: 'Precio de venta (por unidad)'),
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) return 'Ingrese precio de venta';
-                          if (double.tryParse(v.replaceAll(',', '.')) == null) return 'Precio inválido';
-                          return null;
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Column(children: [
-                      const Text('Editar'),
-                      Checkbox(value: manualPrice, onChanged: (v) => setState(() => manualPrice = v ?? false)),
-                    ]),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(children: [
-                  Checkbox(value: priceIsPerUnit, onChanged: (v) => setState(() => priceIsPerUnit = v ?? true)),
-                  const Expanded(child: Text('Precio registrado es por unidad (precio de venta)')),
-                ]),
-                const SizedBox(height: 8),
-                TextFormField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stock inicial'), validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Ingrese stock';
-                  if (int.tryParse(v) == null) return 'Stock inválido';
-                  return null;
-                }),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: providers.isNotEmpty ? providers.first.id : null,
-                  items: providers.map((p) {
-                    final data = p.data() as Map<String, dynamic>;
-                    return DropdownMenuItem(value: p.id, child: Text(data['name'] ?? '—'));
-                  }).toList(),
-                  onChanged: (v) => selectedProviderId = v,
-                  decoration: const InputDecoration(labelText: 'Proveedor (opcional)'),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Nota: Registrar un producto no crea una compra. Las compras se registran desde la sección Egresos',
-                  style: TextStyle(fontSize: 12),
-                ),
-              ]),
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-            TextButton(onPressed: () {
-              if (!_formKey.currentState!.validate()) return;
-              Navigator.pop(c, true);
-            }, child: const Text('Crear')),
-          ],
-        );
-      }),
-    );
-
-    if (created != true) return;
-
-    setState(() => _loadingAction = true);
-    try {
-      if (priceCtrl.text.trim().isEmpty) {
-        final p = double.tryParse(purchasePriceCtrl.text.replaceAll(',', '.')) ?? 0.0;
-        priceCtrl.text = (p * (1 + marginPercent / 100)).toStringAsFixed(2);
-      }
-
-      await _createProductFirestore({
-        'name': nameCtrl.text.trim(),
-        'sku': skuCtrl.text.trim(),
-        'category': (selectedCategory ?? '').trim(),
-        'description': descriptionCtrl.text.trim(),
-        'purchasePrice': double.parse(purchasePriceCtrl.text.replaceAll(',', '.')),
-        'price': double.parse(priceCtrl.text.replaceAll(',', '.')),
-        'marginPercent': marginPercent,
-        'priceIsPerUnit': priceIsPerUnit,
-        'stock': int.parse(stockCtrl.text),
-        'providerId': selectedProviderId,
-        if (pickedExpiry != null) 'expiryDate': pickedExpiry,
-      });
-
-      // recargar categorias por si se agrego una nueva y quieres refrescar otras vistas
-      await _loadCategories();
-
-      _showSnack('Producto creado.');
-    } catch (e) {
-      _showSnack('Error: $e');
-    } finally {
-      setState(() => _loadingAction = false);
-    }
-  }
-
-  // --- Dialog: editar producto ---
-  Future<void> _showEditProductDialog(QueryDocumentSnapshot doc) async {
-    final data = doc.data() as Map<String, dynamic>;
-    final _formKey = GlobalKey<FormState>();
-    final nameCtrl = TextEditingController(text: data['name'] ?? '');
-    final skuCtrl = TextEditingController(text: data['sku'] ?? '');
-    final descriptionCtrl = TextEditingController(text: data['description'] ?? '');
-    final purchasePriceCtrl = TextEditingController(text: (data['purchasePrice'] ?? '').toString());
-    final priceCtrl = TextEditingController(text: (data['price'] ?? '').toString());
-    final stockCtrl = TextEditingController(text: (data['stock'] ?? '').toString());
-    bool priceIsPerUnit = (data['priceIsPerUnit'] ?? true) as bool;
-    double marginPercent = (data['marginPercent'] ?? 10.0) is double ? (data['marginPercent'] ?? 10.0) as double : double.parse((data['marginPercent'] ?? 10.0).toString());
-    bool manualPrice = false;
-    String? selectedProviderId = data['providerId'] as String?;
-
-    // expiry
-    DateTime? pickedExpiry;
-    final rawExpiry = data['expiryDate'];
-    if (rawExpiry != null) {
-      if (rawExpiry is Timestamp) {
-        pickedExpiry = (rawExpiry as Timestamp).toDate();
-      } else if (rawExpiry is DateTime) {
-        pickedExpiry = rawExpiry as DateTime;
-      } else if (rawExpiry is String) {
-        try {
-          pickedExpiry = DateTime.parse(rawExpiry as String);
-        } catch (_) {}
-      }
-    }
-
-    // categoria inicial
-    String? selectedCategory = (data['category'] ?? '').toString().trim();
-    if (selectedCategory.isEmpty) selectedCategory = null;
-
-    final providersSnap = await providersRef.orderBy('name').get();
-    final providers = providersSnap.docs;
-
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (c) => StatefulBuilder(builder: (context, setState) {
-        void _recalcPriceFromPurchase() {
-          final p = double.tryParse(purchasePriceCtrl.text.replaceAll(',', '.')) ?? 0.0;
-          final calculated = (p * (1 + marginPercent / 100));
-          if (!manualPrice) priceCtrl.text = calculated.toStringAsFixed(2);
-        }
-
-        return AlertDialog(
-          title: const Text('Editar producto'),
-          content: SingleChildScrollView(
-            child: Form(
-              key: _formKey,
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                TextFormField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nombre'), validator: (v) => v == null || v.trim().isEmpty ? 'Ingrese nombre' : null),
-                const SizedBox(height: 8),
-                TextFormField(controller: skuCtrl, decoration: const InputDecoration(labelText: 'SKU (id)'), validator: (v) => v == null || v.trim().isEmpty ? 'SKU requerido' : null),
-                const SizedBox(height: 8),
-
-                // --- Categoria: Dropdown + Boton Nueva categoria
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: selectedCategory,
-                        decoration: const InputDecoration(labelText: 'Categoría'),
-                        items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-                        onChanged: (val) => setState(() => selectedCategory = val),
-                        validator: (val) => (val == null || val.trim().isEmpty) ? 'Seleccione o agregue una categoría' : null,
-                        isExpanded: true,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: () async {
-                        final added = await _showAddCategoryDialog(initial: selectedCategory ?? '');
-                        if (added != null) {
-                          setState(() => selectedCategory = added);
-                        }
-                      },
-                      icon: const Icon(Icons.add),
-                      label: const Text('Nueva categoría'),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-
-                TextFormField(controller: descriptionCtrl, decoration: const InputDecoration(labelText: 'Descripción (uso, indicación, presentaciones)'), maxLines: 2),
-                const SizedBox(height: 8),
-                // --- expiry picker (editar)
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(pickedExpiry == null ? 'Fecha de vencimiento: —' : 'Fecha de vencimiento: ${pickedExpiry!.day}/${pickedExpiry!.month}/${pickedExpiry!.year}'),
-                    ),
-                    TextButton(
-                      onPressed: () async {
-                        final now = DateTime.now();
-                        final d = await showDatePicker(
-                          context: context,
-                          initialDate: pickedExpiry ?? now,
-                          firstDate: DateTime(now.year - 5),
-                          lastDate: DateTime(now.year + 10),
-                        );
-                        if (d != null) setState(() => pickedExpiry = d);
-                      },
-                      child: const Text('Seleccionar'),
-                    ),
-                    if (pickedExpiry != null)
-                      IconButton(
-                        onPressed: () => setState(() => pickedExpiry = null),
-                        icon: const Icon(Icons.clear),
-                        tooltip: 'Remover fecha',
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                TextFormField(
-                  controller: purchasePriceCtrl,
-                  keyboardType: TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'Precio de compra (por unidad)'),
-                  onChanged: (_) {
-                    _recalcPriceFromPurchase();
-                    setState(() {});
-                  },
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return 'Ingrese precio de compra';
-                    if (double.tryParse(v.replaceAll(',', '.')) == null) return 'Precio inválido';
-                    return null;
-                  },
-                ),
-                const SizedBox(height: 8),
-                Row(children: [
-                  const Text('Margen %:'),
-                  const SizedBox(width: 8),
-                  SizedBox(
-                    width: 80,
-                    child: TextFormField(
-                      initialValue: marginPercent.toString(),
-                      keyboardType: TextInputType.numberWithOptions(decimal: true),
-                      onChanged: (v) {
-                        marginPercent = double.tryParse(v.replaceAll(',', '.')) ?? 10.0;
-                        _recalcPriceFromPurchase();
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(child: Text('Precio de venta sugerido = compra × (1 + margen)')),
-                ]),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextFormField(
-                        controller: priceCtrl,
-                        enabled: manualPrice,
-                        keyboardType: TextInputType.numberWithOptions(decimal: true),
-                        decoration: const InputDecoration(labelText: 'Precio de venta (por unidad)'),
-                        validator: (v) {
-                          if (v == null || v.trim().isEmpty) return 'Ingrese precio de venta';
-                          if (double.tryParse(v.replaceAll(',', '.')) == null) return 'Precio inválido';
-                          return null;
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Column(children: [
-                      const Text('Editar'),
-                      Checkbox(value: manualPrice, onChanged: (v) => setState(() => manualPrice = v ?? false)),
-                    ]),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(children: [
-                  Checkbox(value: priceIsPerUnit, onChanged: (v) => setState(() => priceIsPerUnit = v ?? true)),
-                  const Expanded(child: Text('Precio registrado es por unidad (precio de venta)')),
-                ]),
-                const SizedBox(height: 8),
-                TextFormField(controller: stockCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Stock'), validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Ingrese stock';
-                  if (int.tryParse(v) == null) return 'Stock inválido';
-                  return null;
-                }),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: selectedProviderId ?? (providers.isNotEmpty ? providers.first.id : null),
-                  items: providers.map((p) {
-                    final pd = p.data() as Map<String, dynamic>;
-                    return DropdownMenuItem(value: p.id, child: Text(pd['name'] ?? '—'));
-                  }).toList(),
-                  onChanged: (v) => selectedProviderId = v,
-                  decoration: const InputDecoration(labelText: 'Proveedor'),
-                ),
-              ]),
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancelar')),
-            TextButton(onPressed: () {
-              if (!_formKey.currentState!.validate()) return;
-              Navigator.pop(c, true);
-            }, child: const Text('Guardar')),
-          ],
-        );
-      }),
-    );
-
-    if (saved != true) return;
-
-    setState(() => _loadingAction = true);
-    try {
-      await _updateProductFirestore(doc.id, {
-        'name': nameCtrl.text.trim(),
-        'sku': skuCtrl.text.trim(),
-        'category': (selectedCategory ?? '').trim(),
-        'description': descriptionCtrl.text.trim(),
-        'purchasePrice': double.parse(purchasePriceCtrl.text.replaceAll(',', '.')),
-        'price': double.parse(priceCtrl.text.replaceAll(',', '.')),
-        'marginPercent': marginPercent,
-        'priceIsPerUnit': priceIsPerUnit,
-        'stock': int.parse(stockCtrl.text),
-        'providerId': selectedProviderId,
-        'expiryDate': pickedExpiry,
-      });
-
-      // recargar categorias (por si se agrego una nueva)
-      await _loadCategories();
-
-      _showSnack('Producto actualizado.');
-    } catch (e) {
-      _showSnack('Error: $e');
-    } finally {
-      setState(() => _loadingAction = false);
-    }
-  }
-
-  Future<void> _tryDeleteProduct(QueryDocumentSnapshot doc) async {
-    final confirm = await _showConfirmation('Eliminar producto', '¿Seguro que deseas eliminar ${ (doc.data() as Map<String,dynamic>)['name'] ?? 'este producto'}?');
-    if (confirm != true) return;
-
-    setState(() => _loadingAction = true);
-    try {
-      await _deleteProductFirestore(doc.id);
-      _showSnack('Producto eliminado.');
-    } catch (e) {
-      _showSnack('Error: $e');
-    } finally {
-      setState(() => _loadingAction = false);
-    }
-  }
-
-  // helper: convierte el campo expiry a DateTime si es posible
   DateTime? _parseExpiry(dynamic raw) {
     if (raw == null) return null;
     if (raw is Timestamp) return raw.toDate();
@@ -691,31 +198,26 @@ class _AdminProductManagerState extends State<AdminProductManager> {
 
   bool _isNearExpiry(DateTime expiry) {
     final now = DateTime.now();
-    final limit = now.add(const Duration(days: 90)); // 3 meses ≈ 90 días
+    final limit = now.add(const Duration(days: 90));
     return expiry.isBefore(limit);
   }
 
-  // --- UI ---
+  // ====== UI ======
+
   @override
   Widget build(BuildContext context) {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        // Header y botón crear
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Gestión de productos', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: kGreen1)),
-            ElevatedButton.icon(
-              onPressed: _showCreateProductDialog,
-              icon: const Icon(Icons.add_box),
-              label: const Text('Nuevo producto'),
-              style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
-            ),
-          ],
+        Center(
+          child: Text(
+            'Gestión de productos',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: kGreen1),
+          ),
         ),
         const SizedBox(height: 12),
 
-        // StreamBuilder lista productos
         StreamBuilder<QuerySnapshot>(
           stream: productsRef.orderBy('createdAt', descending: true).snapshots(),
           builder: (context, snap) {
@@ -724,9 +226,10 @@ class _AdminProductManagerState extends State<AdminProductManager> {
             final docs = snap.data!.docs;
 
             return LayoutBuilder(builder: (context, constraints) {
-              final isMobile = constraints.maxWidth < 750;
+              final isMobile = constraints.maxWidth < 900;
 
               if (isMobile) {
+                // ---- Móvil: Cards
                 return ListView.separated(
                   shrinkWrap: true,
                   physics: const NeverScrollableScrollPhysics(),
@@ -737,6 +240,8 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                     final data = d.data() as Map<String, dynamic>;
                     final expiry = _parseExpiry(data['expiryDate']);
                     final near = expiry != null ? _isNearExpiry(expiry) : false;
+                    final taxable = (data['taxable'] ?? false) == true;
+                    final requiresRx = (data['requiresPrescription'] ?? false) == true;
 
                     return Card(
                       elevation: 2,
@@ -746,27 +251,47 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                           backgroundColor: kGreen3,
                           child: Text((data['name'] ?? 'P').toString().substring(0, 1).toUpperCase()),
                         ),
-                        title: Text('${data['name'] ?? '—'}  (${data['sku'] ?? '—'})'),
+                        title: Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 6,
+                          children: [
+                            Text('${data['name'] ?? '—'}  (${data['sku'] ?? '—'})'),
+                            if (taxable) _chip('IVA', color: Colors.orange),
+                            if (requiresRx) _chip('Bajo receta', color: Colors.redAccent),
+                          ],
+                        ),
                         subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('Categoria: ${data['category'] ?? '—'}'),
-                          Text('Precio: ${data['price']?.toString() ?? '—'} • Stock: ${data['stock'] ?? 0}'),
-                          if ((data['description'] ?? '').toString().isNotEmpty) Text('Descripción: ${data['description']}'),
+                          Text('Categoría: ${data['category'] ?? '—'}'),
+                          Text('Precio (venta): ${_fmt(data['price'])} • Stock: ${data['stock'] ?? 0}'),
+                          if ((data['pharmForm'] ?? '').toString().isNotEmpty || (data['route'] ?? '').toString().isNotEmpty)
+                            Text('Forma/Vía: ${(data['pharmForm'] ?? '—')} / ${(data['route'] ?? '—')}'),
+                          if ((data['strength'] ?? '').toString().isNotEmpty)
+                            Text('Concentración: ${data['strength']}'),
+                          if ((data['presentation'] ?? '').toString().isNotEmpty)
+                            Text('Presentación: ${data['presentation']}'),
+                          if ((data['lot'] ?? '').toString().isNotEmpty)
+                            Text('Lote: ${data['lot']}'),
+                          if ((data['description'] ?? '').toString().isNotEmpty)
+                            Text('Descripción: ${data['description']}'),
                           const SizedBox(height: 4),
                           if (expiry != null)
                             Text(
-                              'Vence: ${expiry.day}/${expiry.month}/${expiry.year}',
+                              'Vence: ${_ddmmyyyy(expiry)}',
                               style: TextStyle(color: near ? Colors.red : Colors.black87),
                             ),
                         ]),
                         isThreeLine: true,
                         trailing: PopupMenuButton<String>(
                           onSelected: (action) async {
-                            if (action == 'edit') await _showEditProductDialog(d);
-                            if (action == 'delete') await _tryDeleteProduct(d);
+                            if (action == 'edit') {
+                              await _showEditProductDialog(d);
+                            } else if (action == 'delete') {
+                              await _tryDeleteProduct(d);
+                            }
                           },
-                          itemBuilder: (_) => [
-                            const PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Editar'))),
-                            const PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete), title: Text('Eliminar'))),
+                          itemBuilder: (_) => const [
+                            PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Editar'))),
+                            PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete), title: Text('Eliminar'))),
                           ],
                         ),
                       ),
@@ -774,17 +299,21 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                   },
                 );
               } else {
-                // Desktop: tabla con columna descripción y vencimiento
+                // ---- Escritorio: DataTable
                 return SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
                     columns: const [
                       DataColumn(label: Text('Nombre')),
                       DataColumn(label: Text('SKU')),
-                      DataColumn(label: Text('Categoria')),
-                      DataColumn(label: Text('Descripción')),
-                      DataColumn(label: Text('Precio')),
+                      DataColumn(label: Text('Categoría')),
+                      DataColumn(label: Text('Precio (venta)')),
+                      DataColumn(label: Text('IVA')),
+                      DataColumn(label: Text('Receta')),
                       DataColumn(label: Text('Stock')),
+                      DataColumn(label: Text('Forma/Vía')),
+                      DataColumn(label: Text('Conc.')),
+                      DataColumn(label: Text('Presentación')),
                       DataColumn(label: Text('Vencimiento')),
                       DataColumn(label: Text('Proveedor')),
                       DataColumn(label: Text('Acciones')),
@@ -792,21 +321,34 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                     rows: docs.map((d) {
                       final data = d.data() as Map<String, dynamic>;
                       final expiry = _parseExpiry(data['expiryDate']);
-                      final expiryText = expiry != null ? '${expiry.day}/${expiry.month}/${expiry.year}' : '—';
+                      final expiryText = expiry != null ? _ddmmyyyy(expiry) : '—';
                       final near = expiry != null ? _isNearExpiry(expiry) : false;
+                      final taxable = (data['taxable'] ?? false) == true;
+                      final requiresRx = (data['requiresPrescription'] ?? false) == true;
+                      final providerName = _providers[data['providerId']] ?? (data['providerId'] ?? '—');
 
                       return DataRow(cells: [
                         DataCell(Text(data['name'] ?? '—')),
                         DataCell(Text(data['sku'] ?? '—')),
                         DataCell(Text(data['category'] ?? '—')),
-                        DataCell(SizedBox(width: 200, child: Text((data['description'] ?? '—').toString(), overflow: TextOverflow.ellipsis))),
-                        DataCell(Text(data['price']?.toString() ?? '—')),
+                        DataCell(Text(_fmt(data['price']))),
+                        DataCell(Icon(taxable ? Icons.check_circle : Icons.cancel, color: taxable ? Colors.orange : Colors.grey)),
+                        DataCell(Icon(requiresRx ? Icons.medical_services : Icons.remove, color: requiresRx ? Colors.redAccent : Colors.grey)),
                         DataCell(Text((data['stock'] ?? 0).toString())),
+                        DataCell(Text('${data['pharmForm'] ?? '—'} / ${data['route'] ?? '—'}')),
+                        DataCell(Text(data['strength']?.toString() ?? '—')),
+                        DataCell(Text(data['presentation']?.toString() ?? '—')),
                         DataCell(Text(expiryText, style: TextStyle(color: near ? Colors.red : Colors.black87))),
-                        DataCell(Text(data['providerId'] ?? '—')),
+                        DataCell(Text(providerName.toString())),
                         DataCell(Row(children: [
-                          IconButton(onPressed: () => _showEditProductDialog(d), icon: const Icon(Icons.edit, color: Colors.black54)),
-                          IconButton(onPressed: () => _tryDeleteProduct(d), icon: const Icon(Icons.delete, color: Colors.redAccent)),
+                          IconButton(
+                            onPressed: () async => _showEditProductDialog(d),
+                            icon: const Icon(Icons.edit, color: Colors.black54),
+                          ),
+                          IconButton(
+                            onPressed: () async => _tryDeleteProduct(d),
+                            icon: const Icon(Icons.delete, color: Colors.redAccent),
+                          ),
                         ])),
                       ]);
                     }).toList(),
@@ -816,8 +358,578 @@ class _AdminProductManagerState extends State<AdminProductManager> {
             });
           },
         ),
+
+        const SizedBox(height: 16),
+        Center(
+          child: ElevatedButton.icon(
+            onPressed: _showCreateProductDialog,
+            icon: const Icon(Icons.add_box),
+            label: const Text('Nuevo producto'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: kGreen2,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ),
+
         if (_loadingAction) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
       ],
     );
+  }
+
+  String _ddmmyyyy(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  String _fmt(dynamic n) {
+    final v = _toNum(n).toDouble();
+    return '\$${v.toStringAsFixed(2)}';
+  }
+
+  Widget _chip(String txt, {Color? color}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: (color ?? Colors.black54).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color ?? Colors.black54),
+      ),
+      child: Text(txt, style: TextStyle(fontSize: 12, color: color ?? Colors.black54)),
+    );
+  }
+
+  // ====== Dialogs ======
+
+  Future<void> _showCreateProductDialog() async {
+    final sku = await _generateNextSku();
+    await _showProductFormDialog(
+      title: 'Nuevo producto',
+      initial: {
+        'sku': sku,
+        'marginPercent': 10,
+        'ivaPercent': 13,
+        'taxable': false,
+        'priceIsPerUnit': true,
+        'requiresPrescription': false,
+        'unitsPerPack': 1,
+        'stock': 0,
+      },
+      onSubmit: (data) async {
+        if (!mounted) return;
+        setState(() => _loadingAction = true);
+        try {
+          await _createProductFirestore(data);
+          _showSnack('Producto creado');
+        } catch (e) {
+          _showSnack('Error al crear: $e');
+        } finally {
+          if (mounted) setState(() => _loadingAction = false);
+        }
+      },
+    );
+  }
+
+  Future<void> _showEditProductDialog(QueryDocumentSnapshot doc) async {
+    final data = doc.data() as Map<String, dynamic>;
+    final initial = Map<String, dynamic>.from(data)..['id'] = doc.id;
+    if (initial['expiryDate'] is Timestamp) {
+      initial['expiryDate'] = (initial['expiryDate'] as Timestamp).toDate();
+    }
+
+    await _showProductFormDialog(
+      title: 'Editar producto',
+      initial: initial,
+      onSubmit: (payload) async {
+        if (!mounted) return;
+        setState(() => _loadingAction = true);
+        try {
+          await _updateProductFirestore(doc.id, payload);
+          _showSnack('Producto actualizado');
+        } catch (e) {
+          _showSnack('Error al actualizar: $e');
+        } finally {
+          if (mounted) setState(() => _loadingAction = false);
+        }
+      },
+    );
+  }
+
+  Future<void> _tryDeleteProduct(QueryDocumentSnapshot doc) async {
+    final data = doc.data() as Map<String, dynamic>;
+    final name = (data['name'] ?? '').toString();
+    final ok = await _showConfirmation('Eliminar', '¿Eliminar el producto "$name"?');
+    if (ok != true) return;
+    if (!mounted) return;
+    setState(() => _loadingAction = true);
+    try {
+      await _deleteProductFirestore(doc.id);
+      _showSnack('Producto eliminado');
+    } catch (e) {
+      _showSnack('Error al eliminar: $e');
+    } finally {
+      if (mounted) setState(() => _loadingAction = false);
+    }
+  }
+
+  // ====== Product Form (Create/Edit) ======
+
+  Future<void> _showProductFormDialog({
+    required String title,
+    required Map<String, dynamic> initial,
+    required Future<void> Function(Map<String, dynamic> data) onSubmit,
+  }) async {
+    final formKey = GlobalKey<FormState>();
+
+    // Controllers
+    final nameCtrl = TextEditingController(text: (initial['name'] ?? '').toString());
+    final skuCtrl = TextEditingController(text: (initial['sku'] ?? '').toString());
+    final descCtrl = TextEditingController(text: (initial['description'] ?? '').toString());
+    final purchasePriceCtrl = TextEditingController(text: _numOrEmpty(initial['purchasePrice']));
+    final marginCtrl = TextEditingController(text: _numOrEmpty(initial['marginPercent'] ?? 10));
+    final ivaCtrl = TextEditingController(text: _numOrEmpty(initial['ivaPercent'] ?? 13));
+    final saleNetCtrl = TextEditingController(text: _numOrEmpty(initial['salePriceNet']));
+    final priceCtrl = TextEditingController(text: _numOrEmpty(initial['price']));
+    final stockCtrl = TextEditingController(text: _numOrEmpty(initial['stock'] ?? 0));
+    final lotCtrl = TextEditingController(text: (initial['lot'] ?? '').toString());
+    final strengthCtrl = TextEditingController(text: (initial['strength'] ?? '').toString());
+    final presentationCtrl = TextEditingController(text: (initial['presentation'] ?? '').toString());
+    final unitsPerPackCtrl = TextEditingController(text: _numOrEmpty(initial['unitsPerPack'] ?? 1));
+
+    String? category = (initial['category'] ?? '').toString().isNotEmpty ? initial['category'] : null;
+    String? providerId = (initial['providerId'] ?? '').toString().isNotEmpty ? initial['providerId'] : null;
+    bool taxable = (initial['taxable'] ?? false) == true;
+    bool priceIsPerUnit = (initial['priceIsPerUnit'] ?? true) == true;
+    bool requiresRx = (initial['requiresPrescription'] ?? false) == true;
+
+    String pharmForm = (initial['pharmForm'] ?? '').toString();
+    String route = (initial['route'] ?? '').toString();
+
+    DateTime? expiry = initial['expiryDate'] is DateTime ? initial['expiryDate'] as DateTime : null;
+
+    bool autoPrice = (initial['autoPrice'] ?? true);
+    if ((initial['price'] == null || initial['price'].toString().isEmpty)) autoPrice = true;
+
+    // Cálculo de precios
+    void recalcFromPurchaseAndMargin() {
+      final purchase = _toNum(purchasePriceCtrl.text).toDouble();
+      final margin = _toNum(marginCtrl.text).toDouble();
+      final iva = _toNum(ivaCtrl.text).toDouble();
+      final net = purchase * (1 + (margin / 100)); // sin IVA
+      final gross = taxable ? net * (1 + (iva / 100)) : net;
+      saleNetCtrl.text = net.toStringAsFixed(4);
+      priceCtrl.text = gross.toStringAsFixed(2);
+    }
+
+    void recalcFromPrice() {
+      final gross = _toNum(priceCtrl.text).toDouble();
+      final iva = _toNum(ivaCtrl.text).toDouble();
+      final net = taxable ? (gross / (1 + (iva / 100))) : gross;
+      saleNetCtrl.text = net.toStringAsFixed(4);
+    }
+
+    if (autoPrice) recalcFromPurchaseAndMargin();
+    if (!autoPrice && priceCtrl.text.isNotEmpty) recalcFromPrice();
+
+    await showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (c) {
+        return StatefulBuilder(
+          builder: (c, setLocal) {
+            Widget labeled(Widget child) => Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6.0),
+              child: child,
+            );
+
+            // CONTENIDO: Wrap limpio (sin Autocomplete)
+            final content = Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              children: [
+                SizedBox(
+                  width: 360,
+                  child: labeled(TextFormField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: 'Nombre *'),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                  )),
+                ),
+                SizedBox(
+                  width: 220,
+                  child: labeled(TextFormField(
+                    controller: skuCtrl,
+                    decoration: const InputDecoration(labelText: 'SKU *'),
+                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                  )),
+                ),
+                SizedBox(
+                  width: 320,
+                  child: labeled(Row(
+                    children: [
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: category,
+                          decoration: const InputDecoration(labelText: 'Categoría *'),
+                          items: _categories.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                          onChanged: (v) => setLocal(() => category = v),
+                          validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Agregar categoría',
+                        onPressed: () async {
+                          try {
+                            final res = await _showAddCategoryDialog(c);
+                            if (!mounted) return;
+                            if (res != null) {
+                              setState(() {}); // refresca lista externa
+                              setLocal(() => category = res);
+                            }
+                          } catch (e) {
+                            _showSnack('No se pudo agregar la categoría: $e');
+                          }
+                        },
+                        icon: const Icon(Icons.add),
+                      ),
+                    ],
+                  )),
+                ),
+                SizedBox(
+                  width: 500,
+                  child: labeled(TextFormField(
+                    controller: descCtrl,
+                    decoration: const InputDecoration(labelText: 'Descripción'),
+                  )),
+                ),
+                SizedBox(
+                  width: 350,
+                  child: labeled(DropdownButtonFormField<String>(
+                    value: providerId,
+                    decoration: const InputDecoration(labelText: 'Proveedor'),
+                    items: _providers.entries
+                        .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
+                        .toList(),
+                    onChanged: (v) => setLocal(() => providerId = v),
+                  )),
+                ),
+                SizedBox(
+                  width: 250,
+                  child: labeled(TextFormField(
+                    controller: lotCtrl,
+                    decoration: const InputDecoration(labelText: 'Lote'),
+                  )),
+                ),
+                SizedBox(
+                  width: 320,
+                  child: labeled(Row(
+                    children: [
+                      Expanded(
+                        child: InkWell(
+                          onTap: () async {
+                            final now = DateTime.now();
+                            final picked = await showDatePicker(
+                              context: c, // contexto del diálogo
+                              firstDate: DateTime(now.year - 1),
+                              lastDate: DateTime(now.year + 15),
+                              initialDate: expiry ?? now,
+                            );
+                            if (picked != null) setLocal(() => expiry = picked);
+                          },
+                          child: InputDecorator(
+                            decoration: const InputDecoration(labelText: 'Fecha de vencimiento'),
+                            child: Text(expiry != null ? _ddmmyyyy(expiry!) : '—'),
+                          ),
+                        ),
+                      ),
+                      if (expiry != null)
+                        IconButton(
+                          tooltip: 'Borrar fecha',
+                          onPressed: () => setLocal(() => expiry = null),
+                          icon: const Icon(Icons.clear),
+                        ),
+                    ],
+                  )),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(TextFormField(
+                    controller: purchasePriceCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Precio de COMPRA (sin IVA) *'),
+                    validator: (v) => (_toNum(v) <= 0) ? 'Monto inválido' : null,
+                    onChanged: (_) {
+                      if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
+                    },
+                  )),
+                ),
+                SizedBox(
+                  width: 220,
+                  child: labeled(TextFormField(
+                    controller: marginCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Margen % (por defecto 10)'),
+                    onChanged: (_) {
+                      if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
+                    },
+                  )),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(SwitchListTile(
+                    title: const Text('Producto grava IVA'),
+                    value: taxable,
+                    onChanged: (v) {
+                      setLocal(() => taxable = v);
+                      if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
+                      else setLocal(recalcFromPrice);
+                    },
+                  )),
+                ),
+                SizedBox(
+                  width: 220,
+                  child: labeled(TextFormField(
+                    controller: ivaCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'IVA % (13)'),
+                    onChanged: (_) {
+                      if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
+                      else setLocal(recalcFromPrice);
+                    },
+                  )),
+                ),
+                SizedBox(
+                  width: 360,
+                  child: labeled(SwitchListTile(
+                    title: const Text('Calcular precio automáticamente'),
+                    subtitle: const Text('Compra + margen (+ IVA si aplica)'),
+                    value: autoPrice,
+                    onChanged: (v) {
+                      setLocal(() => autoPrice = v);
+                      if (v) setLocal(recalcFromPurchaseAndMargin);
+                    },
+                  )),
+                ),
+                SizedBox(
+                  width: 280,
+                  child: labeled(TextFormField(
+                    controller: saleNetCtrl,
+                    enabled: false,
+                    decoration: const InputDecoration(labelText: 'Precio de VENTA SIN IVA (calc.)'),
+                  )),
+                ),
+                SizedBox(
+                  width: 280,
+                  child: labeled(TextFormField(
+                    controller: priceCtrl,
+                    keyboardType: TextInputType.number,
+                    enabled: !autoPrice,
+                    decoration: InputDecoration(
+                      labelText: taxable ? 'Precio de VENTA (CON IVA)' : 'Precio de VENTA',
+                      helperText: autoPrice ? 'Calculado automáticamente' : 'Editable',
+                    ),
+                    onChanged: (_) {
+                      if (!autoPrice) setLocal(recalcFromPrice);
+                    },
+                  )),
+                ),
+                SizedBox(
+                  width: 200,
+                  child: labeled(TextFormField(
+                    controller: stockCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Stock'),
+                  )),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(SwitchListTile(
+                    title: const Text('Precio es por unidad'),
+                    value: priceIsPerUnit,
+                    onChanged: (v) => setLocal(() => priceIsPerUnit = v),
+                  )),
+                ),
+                SizedBox(
+                  width: 320,
+                  child: labeled(SwitchListTile(
+                    title: const Text('Producto bajo receta médica'),
+                    value: requiresRx,
+                    onChanged: (v) => setLocal(() => requiresRx = v),
+                  )),
+                ),
+                SizedBox(
+                  width: 300,
+                  child: labeled(DropdownButtonFormField<String>(
+                    value: pharmForm.isNotEmpty ? pharmForm : null,
+                    decoration: const InputDecoration(
+                      labelText: 'Forma farmacéutica',
+                      helperText: 'Ej: Tableta, Cápsula, Jarabe…',
+                    ),
+                    items: const [
+                      'Tableta', 'Cápsula', 'Jarabe', 'Gotas', 'Suspensión', 'Ungüento', 'Crema', 'Solución inyectable', 'Aerosol', 'Parche'
+                    ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                    onChanged: (v) => setLocal(() => pharmForm = (v ?? '')),
+                  )),
+                ),
+                SizedBox(
+                  width: 300,
+                  child: labeled(DropdownButtonFormField<String>(
+                    value: route.isNotEmpty ? route : null,
+                    decoration: const InputDecoration(
+                      labelText: 'Vía de administración',
+                      helperText: 'Ej: Oral, Tópica, Oftálmica…',
+                    ),
+                    items: const [
+                      'Oral', 'Tópica', 'Oftálmica', 'Otica', 'Intravenosa', 'Intramuscular', 'Subcutánea', 'Rectal', 'Vaginal', 'Inhalatoria'
+                    ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                    onChanged: (v) => setLocal(() => route = (v ?? '')),
+                  )),
+                ),
+                SizedBox(
+                  width: 300,
+                  child: labeled(TextFormField(
+                    controller: strengthCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Concentración',
+                      helperText: 'Ej: 500 mg • 5 mg/5 mL',
+                    ),
+                  )),
+                ),
+                SizedBox(
+                  width: 320,
+                  child: labeled(TextFormField(
+                    controller: presentationCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Presentación',
+                      helperText: 'Ej: Caja x10 • Frasco 120 mL',
+                    ),
+                  )),
+                ),
+                SizedBox(
+                  width: 220,
+                  child: labeled(TextFormField(
+                    controller: unitsPerPackCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Unidades por empaque'),
+                  )),
+                ),
+              ],
+            );
+
+            final screenH = MediaQuery.of(context).size.height;
+            final maxH = screenH * 0.8;
+            final targetH = screenH * 0.6;
+            return AlertDialog(
+              title: Text(title),
+              content: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: maxH),
+                child: SingleChildScrollView(
+                  child: SizedBox(
+                    height: targetH.clamp(420.0, 680.0),
+                    child: Form(key: formKey, child: content),
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')),
+                ElevatedButton.icon(
+                  icon: const Icon(Icons.save),
+                  label: const Text('Guardar'),
+                  onPressed: () async {
+                    if (!formKey.currentState!.validate()) return;
+
+                    final payload = <String, dynamic>{
+                      'name': nameCtrl.text.trim(),
+                      'sku': skuCtrl.text.trim(),
+                      'category': (category ?? '').trim(),
+                      'description': descCtrl.text.trim(),
+                      'purchasePrice': _toNum(purchasePriceCtrl.text),
+                      'marginPercent': _toNum(marginCtrl.text.isEmpty ? '10' : marginCtrl.text),
+                      'taxable': taxable,
+                      'ivaPercent': _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text),
+                      'salePriceNet': _toNum(saleNetCtrl.text),
+                      'price': _toNum(priceCtrl.text),
+                      'priceIsPerUnit': priceIsPerUnit,
+                      'stock': _toNum(stockCtrl.text),
+                      'providerId': providerId,
+                      'lot': lotCtrl.text.trim(),
+                      'requiresPrescription': requiresRx,
+                      'pharmForm': pharmForm.trim(),
+                      'route': route.trim(),
+                      'strength': strengthCtrl.text.trim(),
+                      'presentation': presentationCtrl.text.trim(),
+                      'unitsPerPack': _toNum(unitsPerPackCtrl.text.isEmpty ? '1' : unitsPerPackCtrl.text),
+                      'expiryDate': expiry,
+                    };
+
+                    if (autoPrice) {
+                      final purchase = _toNum(purchasePriceCtrl.text).toDouble();
+                      final margin = _toNum(marginCtrl.text.isEmpty ? '10' : marginCtrl.text).toDouble();
+                      final iva = _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text).toDouble();
+                      final net = purchase * (1 + (margin / 100));
+                      final gross = taxable ? net * (1 + (iva / 100)) : net;
+                      payload['salePriceNet'] = net;
+                      payload['price'] = gross;
+                    } else {
+                      final gross = _toNum(priceCtrl.text).toDouble();
+                      final iva = _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text).toDouble();
+                      final net = taxable ? (gross / (1 + (iva / 100))) : gross;
+                      payload['salePriceNet'] = net;
+                    }
+
+                    Navigator.pop(c); // cerrar diálogo
+                    await onSubmit(payload);
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // Diálogo “Nueva categoría” (usa el contexto del diálogo padre)
+  Future<String?> _showAddCategoryDialog(BuildContext dialogCtx, {String initial = ''}) async {
+    final TextEditingController newCatCtrl = TextEditingController(text: initial);
+    final String? res = await showDialog<String>(
+      context: dialogCtx,
+      barrierDismissible: true,
+      useRootNavigator: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Nueva categoría'),
+        content: TextField(
+          controller: newCatCtrl,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: 'Ej. Analgésicos'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () {
+              final name = newCatCtrl.text.trim();
+              if (name.isNotEmpty) Navigator.of(ctx).pop(name);
+            },
+            child: const Text('Agregar'),
+          ),
+        ],
+      ),
+    );
+
+    if (res != null && res.trim().isNotEmpty) {
+      final name = res.trim();
+      if (!_categories.contains(name)) {
+        setState(() {
+          _categories = [..._categories, name]..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+        });
+      }
+      return name;
+    }
+    return null;
+  }
+
+  String _numOrEmpty(dynamic n) {
+    if (n == null) return '';
+    if (n is num) return n.toString();
+    return n.toString();
   }
 }
