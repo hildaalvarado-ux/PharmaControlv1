@@ -148,7 +148,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       'priceIsPerUnit': (data['priceIsPerUnit'] ?? true) == true,
       'stock': _toNum(data['stock']),
       'providerId': data['providerId'], // puede ser null
-      'lot': nonNullStr(data['lot']),
       'requiresPrescription': (data['requiresPrescription'] ?? false) == true,
       'pharmForm': nonNullStr(data['pharmForm']),
       'route': nonNullStr(data['route']),
@@ -156,15 +155,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       'presentation': nonNullStr(data['presentation']),
       'unitsPerPack': _toNum(data['unitsPerPack'] ?? 1),
     };
-
-    if (data.containsKey('expiryDate')) {
-      final v = data['expiryDate'];
-      if (v is DateTime) {
-        map['expiryDate'] = Timestamp.fromDate(v);
-      } else if (v == null) {
-        map['expiryDate'] = FieldValue.delete();
-      }
-    }
 
     map[isCreate ? 'createdAt' : 'updatedAt'] = FieldValue.serverTimestamp();
     return map;
@@ -200,6 +190,41 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     final now = DateTime.now();
     final limit = now.add(const Duration(days: 90));
     return expiry.isBefore(limit);
+  }
+
+  // ====== Batches UI ======
+
+  Widget _buildBatchesList(String productId) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: productsRef.doc(productId).collection('batches').orderBy('expiryDate').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) return const ListTile(title: Text("Error al cargar lotes."));
+        if (!snapshot.hasData) return const Center(child: Padding(padding: EdgeInsets.all(8.0), child: Text("Cargando lotes...")));
+        if (snapshot.data!.docs.isEmpty) return const ListTile(title: Text("No hay lotes registrados."));
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Text("Lotes", style: TextStyle(fontWeight: FontWeight.bold))),
+            ...snapshot.data!.docs.map((doc) {
+              final batchData = doc.data() as Map<String, dynamic>;
+              final expiry = _parseExpiry(batchData['expiryDate']);
+              final near = expiry != null ? _isNearExpiry(expiry) : false;
+              return ListTile(
+                title: Text("Lote: ${batchData['lot'] ?? 'S/L'} - Cant: ${batchData['qty'] ?? 0}"),
+                subtitle: expiry != null
+                    ? Text(
+                        "Vence: ${_ddmmyyyy(expiry)}",
+                        style: TextStyle(color: near ? Colors.red : Colors.black87),
+                      )
+                    : const Text("Sin fecha de vencimiento"),
+                dense: true,
+              );
+            }).toList(),
+          ],
+        );
+      },
+    );
   }
 
   // ====== UI ======
@@ -238,15 +263,13 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                   itemBuilder: (ctx, i) {
                     final d = docs[i];
                     final data = d.data() as Map<String, dynamic>;
-                    final expiry = _parseExpiry(data['expiryDate']);
-                    final near = expiry != null ? _isNearExpiry(expiry) : false;
                     final taxable = (data['taxable'] ?? false) == true;
                     final requiresRx = (data['requiresPrescription'] ?? false) == true;
 
                     return Card(
                       elevation: 2,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      child: ListTile(
+                      child: ExpansionTile(
                         leading: CircleAvatar(
                           backgroundColor: kGreen3,
                           child: Text((data['name'] ?? 'P').toString().substring(0, 1).toUpperCase()),
@@ -269,31 +292,21 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                             Text('Concentración: ${data['strength']}'),
                           if ((data['presentation'] ?? '').toString().isNotEmpty)
                             Text('Presentación: ${data['presentation']}'),
-                          if ((data['lot'] ?? '').toString().isNotEmpty)
-                            Text('Lote: ${data['lot']}'),
                           if ((data['description'] ?? '').toString().isNotEmpty)
                             Text('Descripción: ${data['description']}'),
-                          const SizedBox(height: 4),
-                          if (expiry != null)
-                            Text(
-                              'Vence: ${_ddmmyyyy(expiry)}',
-                              style: TextStyle(color: near ? Colors.red : Colors.black87),
-                            ),
                         ]),
-                        isThreeLine: true,
-                        trailing: PopupMenuButton<String>(
-                          onSelected: (action) async {
-                            if (action == 'edit') {
-                              await _showEditProductDialog(d);
-                            } else if (action == 'delete') {
-                              await _tryDeleteProduct(d);
-                            }
-                          },
-                          itemBuilder: (_) => const [
-                            PopupMenuItem(value: 'edit', child: ListTile(leading: Icon(Icons.edit), title: Text('Editar'))),
-                            PopupMenuItem(value: 'delete', child: ListTile(leading: Icon(Icons.delete), title: Text('Eliminar'))),
-                          ],
-                        ),
+                        children: [
+                          _buildBatchesList(d.id),
+                          // Adding edit/delete actions inside the expanded area
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton.icon(onPressed: () => _showEditProductDialog(d), icon: const Icon(Icons.edit), label: const Text("Editar")),
+                              TextButton.icon(onPressed: () => _tryDeleteProduct(d), icon: const Icon(Icons.delete), label: const Text("Eliminar")),
+                            ],
+                          )
+                        ],
+                        trailing: const Icon(Icons.keyboard_arrow_down), // Standard expansion icon
                       ),
                     );
                   },
@@ -314,15 +327,12 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                       DataColumn(label: Text('Forma/Vía')),
                       DataColumn(label: Text('Conc.')),
                       DataColumn(label: Text('Presentación')),
-                      DataColumn(label: Text('Vencimiento')),
+                      DataColumn(label: Text('Lotes')),
                       DataColumn(label: Text('Proveedor')),
                       DataColumn(label: Text('Acciones')),
                     ],
                     rows: docs.map((d) {
                       final data = d.data() as Map<String, dynamic>;
-                      final expiry = _parseExpiry(data['expiryDate']);
-                      final expiryText = expiry != null ? _ddmmyyyy(expiry) : '—';
-                      final near = expiry != null ? _isNearExpiry(expiry) : false;
                       final taxable = (data['taxable'] ?? false) == true;
                       final requiresRx = (data['requiresPrescription'] ?? false) == true;
                       final providerName = _providers[data['providerId']] ?? (data['providerId'] ?? '—');
@@ -338,7 +348,25 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                         DataCell(Text('${data['pharmForm'] ?? '—'} / ${data['route'] ?? '—'}')),
                         DataCell(Text(data['strength']?.toString() ?? '—')),
                         DataCell(Text(data['presentation']?.toString() ?? '—')),
-                        DataCell(Text(expiryText, style: TextStyle(color: near ? Colors.red : Colors.black87))),
+                        DataCell(IconButton(
+                          icon: const Icon(Icons.inventory_2_outlined),
+                          tooltip: 'Ver Lotes',
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (c) => AlertDialog(
+                                title: Text("Lotes para ${data['name'] ?? ''}"),
+                                content: SizedBox(
+                                  width: 400,
+                                  child: _buildBatchesList(d.id),
+                                ),
+                                actions: [
+                                  TextButton(onPressed: () => Navigator.pop(c), child: const Text("Cerrar")),
+                                ],
+                              ),
+                            );
+                          },
+                        )),
                         DataCell(Text(providerName.toString())),
                         DataCell(Row(children: [
                           IconButton(
@@ -490,7 +518,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     final saleNetCtrl = TextEditingController(text: _numOrEmpty(initial['salePriceNet']));
     final priceCtrl = TextEditingController(text: _numOrEmpty(initial['price']));
     final stockCtrl = TextEditingController(text: _numOrEmpty(initial['stock'] ?? 0));
-    final lotCtrl = TextEditingController(text: (initial['lot'] ?? '').toString());
     final strengthCtrl = TextEditingController(text: (initial['strength'] ?? '').toString());
     final presentationCtrl = TextEditingController(text: (initial['presentation'] ?? '').toString());
     final unitsPerPackCtrl = TextEditingController(text: _numOrEmpty(initial['unitsPerPack'] ?? 1));
@@ -503,8 +530,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
 
     String pharmForm = (initial['pharmForm'] ?? '').toString();
     String route = (initial['route'] ?? '').toString();
-
-    DateTime? expiry = initial['expiryDate'] is DateTime ? initial['expiryDate'] as DateTime : null;
 
     bool autoPrice = (initial['autoPrice'] ?? true);
     if ((initial['price'] == null || initial['price'].toString().isEmpty)) autoPrice = true;
@@ -613,44 +638,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                   )),
                 ),
                 SizedBox(
-                  width: 250,
-                  child: labeled(TextFormField(
-                    controller: lotCtrl,
-                    decoration: const InputDecoration(labelText: 'Lote'),
-                  )),
-                ),
-                SizedBox(
-                  width: 320,
-                  child: labeled(Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          onTap: () async {
-                            final now = DateTime.now();
-                            final picked = await showDatePicker(
-                              context: c, // contexto del diálogo
-                              firstDate: DateTime(now.year - 1),
-                              lastDate: DateTime(now.year + 15),
-                              initialDate: expiry ?? now,
-                            );
-                            if (picked != null) setLocal(() => expiry = picked);
-                          },
-                          child: InputDecorator(
-                            decoration: const InputDecoration(labelText: 'Fecha de vencimiento'),
-                            child: Text(expiry != null ? _ddmmyyyy(expiry!) : '—'),
-                          ),
-                        ),
-                      ),
-                      if (expiry != null)
-                        IconButton(
-                          tooltip: 'Borrar fecha',
-                          onPressed: () => setLocal(() => expiry = null),
-                          icon: const Icon(Icons.clear),
-                        ),
-                    ],
-                  )),
-                ),
-                SizedBox(
                   width: 260,
                   child: labeled(TextFormField(
                     controller: purchasePriceCtrl,
@@ -736,8 +723,9 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                   width: 200,
                   child: labeled(TextFormField(
                     controller: stockCtrl,
+                    enabled: false, // Stock is now calculated from batches
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Stock'),
+                    decoration: const InputDecoration(labelText: 'Stock (Calculado)'),
                   )),
                 ),
                 SizedBox(
@@ -851,14 +839,12 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                       'priceIsPerUnit': priceIsPerUnit,
                       'stock': _toNum(stockCtrl.text),
                       'providerId': providerId,
-                      'lot': lotCtrl.text.trim(),
                       'requiresPrescription': requiresRx,
                       'pharmForm': pharmForm.trim(),
                       'route': route.trim(),
                       'strength': strengthCtrl.text.trim(),
                       'presentation': presentationCtrl.text.trim(),
                       'unitsPerPack': _toNum(unitsPerPackCtrl.text.isEmpty ? '1' : unitsPerPackCtrl.text),
-                      'expiryDate': expiry,
                     };
 
                     if (autoPrice) {
