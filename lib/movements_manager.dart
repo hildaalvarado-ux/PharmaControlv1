@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'ingreso_form.dart';
 import 'egreso_form.dart';
 
-/// Colección 'movements' usada por la UI de Movimientos.
-
 class MovementsManager extends StatefulWidget {
   const MovementsManager({super.key});
 
@@ -26,7 +24,8 @@ class _MovementsManagerState extends State<MovementsManager> {
 
   void _snack(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Query _buildQuery() {
@@ -41,10 +40,15 @@ class _MovementsManagerState extends State<MovementsManager> {
       case _View.all:
         break;
     }
-    if (_from != null) q = q.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_from!));
+    if (_from != null) {
+      q = q.where('createdAt',
+          isGreaterThanOrEqualTo: Timestamp.fromDate(_from!));
+    }
     if (_to != null) {
-      final toEnd = DateTime(_to!.year, _to!.month, _to!.day, 23, 59, 59, 999);
-      q = q.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(toEnd));
+      final toEnd =
+          DateTime(_to!.year, _to!.month, _to!.day, 23, 59, 59, 999);
+      q = q.where('createdAt',
+          isLessThanOrEqualTo: Timestamp.fromDate(toEnd));
     }
     return q;
   }
@@ -55,21 +59,28 @@ class _MovementsManagerState extends State<MovementsManager> {
       context: context,
       firstDate: DateTime(now.year - 2),
       lastDate: DateTime(now.year + 2),
-      initialDateRange: (_from != null && _to != null) ? DateTimeRange(start: _from!, end: _to!) : null,
+      initialDateRange: (_from != null && _to != null)
+          ? DateTimeRange(start: _from!, end: _to!)
+          : null,
     );
-    if (res != null) setState(() { _from = res.start; _to = res.end; });
+    if (res != null) {
+      setState(() {
+        _from = res.start;
+        _to = res.end;
+      });
+    }
   }
 
-  // Navegar a formulario en pantalla completa usando wrappers
   Future<void> _openIngresoFullScreen() async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const IngresoPage()));
-    // cuando vuelva, el stream actualiza automáticamente; si quisieras forzar recarga, setState() aquí.
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const IngresoPage()));
     if (!mounted) return;
     setState(() {});
   }
 
   Future<void> _openEgresoFullScreen() async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EgresoPage()));
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const EgresoPage()));
     if (!mounted) return;
     setState(() {});
   }
@@ -79,22 +90,33 @@ class _MovementsManagerState extends State<MovementsManager> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Cabecera con acciones principales
         Row(
           children: [
             Text(
               'Movimientos',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
             ),
             const Spacer(),
             SegmentedButton<_View>(
               segments: const [
-                ButtonSegment(value: _View.all, label: Text('Todos'), icon: Icon(Icons.all_inbox)),
-                ButtonSegment(value: _View.ingresos, label: Text('Ingresos'), icon: Icon(Icons.trending_up)),
-                ButtonSegment(value: _View.egresos, label: Text('Egresos'), icon: Icon(Icons.trending_down)),
+                ButtonSegment(
+                    value: _View.all,
+                    label: Text('Todos'),
+                    icon: Icon(Icons.all_inbox)),
+                ButtonSegment(
+                    value: _View.ingresos,
+                    label: Text('Ingresos'),
+                    icon: Icon(Icons.trending_up)),
+                ButtonSegment(
+                    value: _View.egresos,
+                    label: Text('Egresos'),
+                    icon: Icon(Icons.trending_down)),
               ],
               selected: <_View>{_view},
-              onSelectionChanged: (s) => setState(() => _view = s.first),
+              onSelectionChanged: (s) =>
+                  setState(() => _view = s.first),
             ),
             const SizedBox(width: 12),
             OutlinedButton.icon(
@@ -103,18 +125,20 @@ class _MovementsManagerState extends State<MovementsManager> {
               label: Text(
                 (_from == null || _to == null)
                     ? 'Rango de fechas'
-                    : '${_from!.day}/${_from!.month}/${_from!.year} - ${_to!.day}/${_to!.month}/${_to!.year}',
+                    : '${_from!.day}/${_from!.month}/${_from!.year} - '
+                        '${_to!.day}/${_to!.month}/${_to!.year}',
               ),
             ),
             if (_from != null || _to != null)
               IconButton(
                 tooltip: 'Limpiar filtro de fecha',
-                onPressed: () => setState(() { _from = null; _to = null; }),
+                onPressed: () => setState(() {
+                  _from = null;
+                  _to = null;
+                }),
                 icon: const Icon(Icons.clear),
               ),
             const SizedBox(width: 12),
-
-            // Botones: ahora abren páginas completas (wrappers)
             FilledButton.icon(
               onPressed: _openIngresoFullScreen,
               icon: const Icon(Icons.add_shopping_cart),
@@ -129,15 +153,19 @@ class _MovementsManagerState extends State<MovementsManager> {
           ],
         ),
         const SizedBox(height: 12),
-
         if (_busy) const LinearProgressIndicator(minHeight: 2),
 
-        // Lista/Tabla de movimientos
         StreamBuilder<QuerySnapshot>(
           stream: _buildQuery().snapshots(),
           builder: (context, snap) {
-            if (snap.hasError) return const Text('Error al cargar movimientos');
-            if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+            if (snap.hasError) {
+              return const Text('Error al cargar movimientos');
+            }
+            if (!snap.hasData) {
+              return const Center(
+                  child: CircularProgressIndicator());
+            }
+
             final docs = snap.data!.docs;
 
             return LayoutBuilder(
@@ -147,49 +175,82 @@ class _MovementsManagerState extends State<MovementsManager> {
                 if (isMobile) {
                   return ListView.separated(
                     shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
+                    physics:
+                        const NeverScrollableScrollPhysics(),
+                    itemCount: docs.length,
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(height: 8),
                     itemBuilder: (_, i) {
                       final d = docs[i];
-                      final m = d.data() as Map<String, dynamic>;
+                      final m =
+                          d.data() as Map<String, dynamic>;
                       final ts = m['createdAt'];
-                      DateTime? dt; if (ts is Timestamp) dt = ts.toDate();
-                      final items = (m['items'] as List<dynamic>? ?? []).cast<Map>();
+                      DateTime? dt;
+                      if (ts is Timestamp) dt = ts.toDate();
+
+                      final items =
+                          (m['items'] as List<dynamic>? ?? [])
+                              .cast<Map>();
 
                       return Card(
                         child: ExpansionTile(
                           leading: CircleAvatar(
-                            child: Icon(m['type'] == 'ingreso' ? Icons.trending_up : Icons.trending_down),
+                            child: Icon(m['type'] == 'ingreso'
+                                ? Icons.trending_up
+                                : Icons.trending_down),
                           ),
-                          title: Text('${m['type'] == 'ingreso' ? 'Ingreso' : 'Egreso'}  •  ${m['createdByName'] ?? '—'}'),
+                          title: Text(
+                              '${m['type'] == 'ingreso' ? 'Ingreso' : 'Egreso'} • ${m['createdByName'] ?? '—'}'),
                           subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
+                            crossAxisAlignment:
+                                CrossAxisAlignment.start,
                             children: [
-                              if (dt != null) Text('${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}'),
-                              Text('Líneas: ${m['totalItems'] ?? items.length} • Total: ${(m['totalAmount'] ?? 0).toString()}'),
-                              if ((m['counterpartyName'] ?? '') != '') Text(m['type'] == 'ingreso' ? 'Cliente: ${m['counterpartyName']}' : 'Proveedor: ${m['counterpartyName']}'),
-                              if ((m['note'] ?? '') != '') Text('Nota: ${m['note']}'),
+                              if (dt != null)
+                                Text(
+                                    '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}'),
+                              Text(
+                                  'Líneas: ${m['totalItems'] ?? items.length} • '
+                                  'Total: ${(m['totalAmount'] ?? 0).toStringAsFixed(2)}'),
+                              if ((m['counterpartyName'] ?? '')
+                                  .isNotEmpty)
+                                Text(m['type'] == 'ingreso'
+                                    ? 'Cliente: ${m['counterpartyName']}'
+                                    : 'Proveedor: ${m['counterpartyName']}'),
+                              if ((m['note'] ?? '').isNotEmpty)
+                                Text('Nota: ${m['note']}'),
                             ],
                           ),
                           children: [
                             const Divider(height: 1),
                             ...items.map((it) {
+                              final qty =
+                                  (it['qty'] ?? 0).toDouble();
+                              final unitPrice = (it['unitPrice'] ?? 0)
+                                  .toDouble();
+                              final subtotal = (it['subtotal'] ?? 0)
+                                  .toDouble();
+
                               return ListTile(
                                 dense: true,
-                                title: Text('${it['productName']} (SKU: ${it['sku']})'),
-                                subtitle: Text('Cant: ${it['qty']} • P. unidad: ${it['unitPrice']} • Subtotal: ${it['subtotal']}'),
-                                trailing: Text('Stock: ${it['stockBefore']} → ${it['stockAfter']}'),
+                                title: Text(
+                                    '${it['productName']} (SKU: ${it['sku']})'),
+                                subtitle: Text(
+                                  'Cant: ${qty.toStringAsFixed(2)} • '
+                                  'P. unidad: ${unitPrice.toStringAsFixed(2)} • '
+                                  'Subtotal: ${subtotal.toStringAsFixed(2)}',
+                                ),
+                                trailing: Text(
+                                    'Stock: ${it['stockBefore']} → ${it['stockAfter']}'),
                               );
                             }),
                           ],
                         ),
                       );
                     },
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
-                    itemCount: docs.length,
                   );
                 }
 
-                // Escritorio: DataTable simple
+                // ESCRITORIO
                 return SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: DataTable(
@@ -203,52 +264,98 @@ class _MovementsManagerState extends State<MovementsManager> {
                       DataColumn(label: Text('Detalle')),
                     ],
                     rows: docs.map((d) {
-                      final m = d.data() as Map<String, dynamic>;
+                      final m =
+                          d.data() as Map<String, dynamic>;
                       final ts = m['createdAt'];
-                      DateTime? dt; if (ts is Timestamp) dt = ts.toDate();
-                      final items = (m['items'] as List<dynamic>? ?? []).cast<Map>();
+                      DateTime? dt;
+                      if (ts is Timestamp) dt = ts.toDate();
+
+                      final items =
+                          (m['items'] as List<dynamic>? ?? [])
+                              .cast<Map>();
+
                       return DataRow(cells: [
-                        DataCell(Text(dt == null ? '—' : '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}')),
-                        DataCell(Chip(label: Text(m['type'] == 'ingreso' ? 'Ingreso' : 'Egreso'))),
-                        DataCell(Text(m['createdByName'] ?? '—')),
-                        DataCell(Text((m['counterpartyName'] ?? '—').toString())),
-                        DataCell(Text((m['totalItems'] ?? items.length).toString())),
-                        DataCell(Text((m['totalAmount'] ?? 0).toString())),
+                        DataCell(Text(dt == null
+                            ? '—'
+                            : '${dt.day}/${dt.month}/${dt.year} '
+                                '${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}')),
+                        DataCell(Chip(
+                            label: Text(m['type'] == 'ingreso'
+                                ? 'Ingreso'
+                                : 'Egreso'))),
+                        DataCell(
+                            Text(m['createdByName'] ?? '—')),
+                        DataCell(Text(
+                            (m['counterpartyName'] ?? '—')
+                                .toString())),
+                        DataCell(Text((m['totalItems'] ??
+                                items.length)
+                            .toString())),
+                        DataCell(Text((m['totalAmount'] ?? 0)
+                            .toStringAsFixed(2))),
                         DataCell(
                           IconButton(
+                            icon: const Icon(Icons.list),
                             tooltip: 'Ver líneas',
                             onPressed: () {
                               showDialog(
                                 context: context,
                                 builder: (cx) => AlertDialog(
-                                  title: const Text('Detalle del movimiento'),
+                                  title: const Text(
+                                      'Detalle del movimiento'),
                                   content: SizedBox(
                                     width: 600,
                                     child: ListView(
                                       shrinkWrap: true,
                                       children: [
-                                        if ((m['note'] ?? '') != '') Padding(
-                                          padding: const EdgeInsets.only(bottom: 8.0),
-                                          child: Text('Nota: ${m['note']}'),
-                                        ),
-                                        ...items.map((it) => ListTile(
-                                          dense: true,
-                                          title: Text('${it['productName']} (SKU: ${it['sku']})'),
-                                          subtitle: Text('Cant: ${it['qty']} • P. unidad: ${it['unitPrice']} • Subtotal: ${it['subtotal']}'),
-                                          trailing: Text('Stock: ${it['stockBefore']} → ${it['stockAfter']}'),
-                                        )),
+                                        if ((m['note'] ?? '')
+                                            .isNotEmpty)
+                                          Padding(
+                                            padding:
+                                                const EdgeInsets.only(
+                                                    bottom: 8.0),
+                                            child: Text(
+                                                'Nota: ${m['note']}'),
+                                          ),
+                                        ...items.map((it) {
+                                          final qty =
+                                              (it['qty'] ?? 0)
+                                                  .toDouble();
+                                          final unitPrice =
+                                              (it['unitPrice'] ?? 0)
+                                                  .toDouble();
+                                          final subtotal =
+                                              (it['subtotal'] ?? 0)
+                                                  .toDouble();
+
+                                          return ListTile(
+                                            dense: true,
+                                            title: Text(
+                                                '${it['productName']} (SKU: ${it['sku']})'),
+                                            subtitle: Text(
+                                              'Cant: ${qty.toStringAsFixed(2)} • '
+                                              'P. unidad: ${unitPrice.toStringAsFixed(2)} • '
+                                              'Subtotal: ${subtotal.toStringAsFixed(2)}',
+                                            ),
+                                            trailing: Text(
+                                                'Stock: ${it['stockBefore']} → ${it['stockAfter']}'),
+                                          );
+                                        }),
                                       ],
                                     ),
                                   ),
                                   actions: [
-                                    TextButton(onPressed: () => Navigator.pop(cx), child: const Text('Cerrar')),
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(cx),
+                                      child: const Text('Cerrar'),
+                                    ),
                                   ],
                                 ),
                               );
                             },
-                            icon: const Icon(Icons.list),
                           ),
-                        ),
+                        )
                       ]);
                     }).toList(),
                   ),
@@ -262,11 +369,7 @@ class _MovementsManagerState extends State<MovementsManager> {
   }
 }
 
-/// ----- Wrappers para abrir formularios en pantalla completa -----
-/// Las páginas abajo envuelven los widgets de formulario embebibles
-/// en un Scaffold con AppBar para evitar errores de Material cuando
-/// se navega con Navigator.push(...).
-
+/// Wrappers de formularios
 class EgresoPage extends StatelessWidget {
   const EgresoPage({super.key});
 
@@ -282,11 +385,12 @@ class EgresoPage extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: const EgresoFormWidget(), // el widget embebible
+              child: const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: EgresoFormWidget(),
               ),
             ),
           ),
@@ -311,11 +415,12 @@ class IngresoPage extends StatelessWidget {
           child: Padding(
             padding: const EdgeInsets.all(16.0),
             child: Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
               elevation: 4,
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: const IngresoFormWidget(),
+              child: const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: IngresoFormWidget(),
               ),
             ),
           ),
