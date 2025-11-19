@@ -357,159 +357,59 @@ try {
 
   // ====== GUARDAR ingreso con batches (mejorado) ======
   Future<void> _save() async {
-    if (_products == null) {
-      _showSnack('Cargando productos...');
-      return;
-    }
     if (_lines.isEmpty) {
-      _showSnack('Agrega al menos un producto.');
+      _showSnack('Agrega al menos un lote de producto.');
       return;
-    }
-
-    // Validaciones por línea
-    for (var i = 0; i < _lines.length; i++) {
-      final l = _lines[i];
-      if (!l.isNew && (l.productId == null || l.productId!.isEmpty)) {
-        _showSnack('Selecciona un producto en la fila ${i + 1}');
-        return;
-      }
-      if (l.isNew && l.newName.trim().isEmpty) {
-        _showSnack('Escribe el nombre del producto nuevo en la fila ${i + 1}');
-        return;
-      }
-      if (l.qty <= 0) {
-        _showSnack('Cantidad inválida en la fila ${i + 1}');
-        return;
-      }
-      if (l.purchasePrice < 0) {
-        _showSnack('Precio de compra inválido en la fila ${i + 1}');
-        return;
-      }
     }
 
     setState(() => _loading = true);
 
     try {
-      // 1) Pre-crear productos nuevos (fuera de la transacción para obtener ids)
-      for (final l in _lines.where((x) => x.isNew)) {
-        final newRef = productsRef.doc();
-        await newRef.set({
-          'name': l.newName.trim(),
-          'sku': l.newSku.trim(),
-          'purchasePrice': l.purchasePrice,
-          'marginPercent': 10,
-          'price': l.salePrice,
-          'stock': 0,
-          'pharmForm': '',
-          'route': '',
-          'strength': '',
-          'presentation': '',
-          'createdAt': FieldValue.serverTimestamp(),
-          // campos nuevos de resumen
-          'lastLot': l.lot.trim().isEmpty ? null : l.lot.trim(),
-          'lastExpiry': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
-          'batchesCount': 0,
-        });
-        l.productId = newRef.id;
-        l.isNew = false;
-      }
-
-      // 2) Preparar ingreso (crear doc)
       final ingresoRef = ingresosRef.doc();
       final itemsForDb = <Map<String, dynamic>>[];
+      final providerId = _providersList?.firstWhere((p) => (p.data() as Map)['name'] == providerCtrl.text, orElse: () => _providersList!.first).id;
 
-      final providerId = providerCtrl.text.trim().isNotEmpty
-          ? providerCtrl.text.trim()
-          : (_providersList != null && _providersList!.isNotEmpty ? _providersList!.first.id : null);
-
-      // 3) Pre-buscar batches por lote para cada línea (reduce riesgo de duplicado)
-      final Map<String, String?> preBatchInfo = {}; // clave: productId#lineIndex -> batchId
-      for (var i = 0; i < _lines.length; i++) {
-        final l = _lines[i];
-        final prodId = l.productId!;
-        final lote = l.lot.trim();
-        String key = '$prodId#$i';
-        preBatchInfo[key] = null;
-        if (lote.isNotEmpty) {
-          final q = await productsRef.doc(prodId).collection('batches').where('lot', isEqualTo: lote).limit(1).get();
-          if (q.docs.isNotEmpty) preBatchInfo[key] = q.docs.first.id;
-        }
-      }
-
-      // 4) Ejecutar transacción: crea/actualiza batches y actualiza stock + crea ingreso
       await FirebaseFirestore.instance.runTransaction((tx) async {
-        // Validar existencia de productos
         for (final l in _lines) {
           final prodRef = productsRef.doc(l.productId);
-          final prodSnap = await tx.get(prodRef);
-          if (!prodSnap.exists) throw Exception('Producto no encontrado: ${l.productId}');
-        }
-
-        // Procesar cada línea
-        for (var i = 0; i < _lines.length; i++) {
-          final l = _lines[i];
-          final prodRef = productsRef.doc(l.productId);
-          final prodSnap = await tx.get(prodRef);
-          final prodData = prodSnap.data() as Map<String, dynamic>? ?? {};
-
           final lote = l.lot.trim();
-          String? key = '${l.productId}#$i';
-          String? batchId = preBatchInfo[key];
 
-          if (batchId != null) {
-            // actualizar batch existente
-            final batchRef = prodRef.collection('batches').doc(batchId);
-            tx.update(batchRef, {
-              'qty': FieldValue.increment(l.qty),
-              if (l.expiryDate != null) 'expiry': Timestamp.fromDate(l.expiryDate!),
-              'purchasePrice': l.purchasePrice,
-              'ingresoId': ingresoRef.id,
-            });
+          DocumentReference batchRef;
+          final batchQuery = await prodRef.collection('batches').where('lot', isEqualTo: lote.isNotEmpty ? lote : null).limit(1).get();
+
+          if (batchQuery.docs.isNotEmpty) {
+            batchRef = batchQuery.docs.first.reference;
+            tx.update(batchRef, {'qty': FieldValue.increment(l.qty)});
           } else {
-            // crear nuevo batch
-            final newBatchRef = prodRef.collection('batches').doc();
-            tx.set(newBatchRef, {
+            batchRef = prodRef.collection('batches').doc();
+            tx.set(batchRef, {
               'lot': lote.isEmpty ? null : lote,
               'qty': l.qty,
-              'expiry': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
+              'expiryDate': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
               'purchasePrice': l.purchasePrice,
-              'ingresoId': ingresoRef.id,
               'createdAt': FieldValue.serverTimestamp(),
-            });
-            batchId = newBatchRef.id;
-
-            // incrementar batchesCount si aplica
-            final prevCount = (prodData['batchesCount'] is int) ? prodData['batchesCount'] as int : 0;
-            tx.update(prodRef, {
-              'batchesCount': prevCount + 1,
             });
           }
 
-          // actualizar producto (stock y precios y resumen)
           tx.update(prodRef, {
             'stock': FieldValue.increment(l.qty),
             'purchasePrice': l.purchasePrice,
             'price': l.salePrice,
             'lastPurchaseAt': FieldValue.serverTimestamp(),
-            'lastLot': lote.isEmpty ? FieldValue.delete() : lote,
-            'lastExpiry': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : FieldValue.delete(),
           });
 
-          // preparar item para ingreso
           itemsForDb.add({
             'productId': l.productId,
+            'productName': (await tx.get(prodRef)).data()?['name'] ?? '',
             'qty': l.qty,
             'purchasePrice': l.purchasePrice,
-            'salePrice': l.salePrice,
             'subtotal': l.subtotal,
             'lot': lote.isEmpty ? null : lote,
-            'manufactureDate': l.manufactureDate != null ? Timestamp.fromDate(l.manufactureDate!) : null,
             'expiryDate': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
-            'batchId': batchId,
+            'batchId': batchRef.id,
           });
         }
 
-        // Crear documento de ingreso
         tx.set(ingresoRef, {
           'userId': FirebaseAuth.instance.currentUser?.uid,
           'items': itemsForDb,
@@ -527,7 +427,6 @@ try {
       _showSnack('Error al registrar compra: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
-      _loadData();
     }
   }
 

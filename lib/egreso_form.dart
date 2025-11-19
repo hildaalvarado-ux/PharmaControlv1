@@ -413,6 +413,24 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           if (l.qty > currentStock) {
             throw Exception('Stock insuficiente para "${l.name}". Disponible: $currentStock');
           }
+
+          // Lógica de consumo de lotes (FIFO por fecha de vencimiento)
+          final batchesQuery = await prodRef.collection('batches').orderBy('expiryDate').get();
+          int remainingQty = l.qty;
+          for (final batchDoc in batchesQuery.docs) {
+            if (remainingQty <= 0) break;
+            final batchData = batchDoc.data();
+            final batchQty = _toInt(batchData['qty']);
+            final consumeQty = remainingQty > batchQty ? batchQty : remainingQty;
+
+            tx.update(batchDoc.reference, {'qty': FieldValue.increment(-consumeQty)});
+            remainingQty -= consumeQty;
+          }
+
+          if (remainingQty > 0) {
+            throw Exception('Error al consumir lotes para "${l.name}". Stock inconsistente.');
+          }
+
           final stockAfter = currentStock - l.qty;
 
           itemsForSave.add({
@@ -427,6 +445,9 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
             'stockAfter': stockAfter,
             'sku': prodData['sku'] ?? '',
           });
+
+          // Actualizar stock total del producto
+          tx.update(prodRef, {'stock': stockAfter, 'lastSaleAt': FieldValue.serverTimestamp()});
         }
 
         // 4) Guardar egreso
@@ -443,19 +464,9 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           'recipeChecked': _anyRequiresRecipe() ? _recipeChecked : null,
         });
 
-        // 5) Actualizar stock
-        for (final it in itemsForSave) {
-          final ref = productsRef.doc(it['productId'] as String);
-          tx.update(ref, {
-            'stock': it['stockAfter'],
-            'lastSaleAt': FieldValue.serverTimestamp(),
-          });
-        }
-
-        // 6) Crear resumen en 'movements' (para que MovementsManager lo muestre)
+        // 5) Crear resumen en 'movements'
         final movementsRef = FirebaseFirestore.instance.collection('movements');
         final movementDocRef = movementsRef.doc();
-
         final currentUser = FirebaseAuth.instance.currentUser;
         final createdByName = currentUser?.displayName ?? currentUser?.email ?? 'Usuario';
 
@@ -474,7 +485,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           'recipeChecked': _anyRequiresRecipe() ? _recipeChecked : null,
         });
 
-        // 7) Incrementar contador
+        // 6) Incrementar contador
         if (counterSnap.exists) {
           tx.update(counterRef, {'next': nextNumber + 1});
         } else {
@@ -485,7 +496,6 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       _showSnack('Venta registrada.');
       await _printCurrentInvoice(saleId: createdId, when: nowWhen);
 
-      // Si la forma está embebida en el Dashboard: limpiar, si fue push: pop con resultado.
       if (mounted) {
         if (Navigator.canPop(context)) {
           Navigator.pop(context, {'createdId': createdId});
