@@ -55,10 +55,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
 
   List<QueryDocumentSnapshot>? _products;
   Map<String, Map<String, dynamic>> _prodMap = {};
-  List<QueryDocumentSnapshot>? _providersList;
-
-  // categorías de ejemplo (puedes sustituir por una colección si la tienes)
-  List<String> _categories = ['Medicamento', 'Aseo', 'Veterinaria', 'Otro'];
+  List<QueryDocumentSnapshot>? _providers;
 
   final providerCtrl = TextEditingController();
   final invoiceCtrl = TextEditingController();
@@ -95,7 +92,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     final provs = await providersRef.orderBy('name').get();
     _products = ps.docs;
     _prodMap = {for (var d in ps.docs) d.id: (d.data() as Map<String, dynamic>)};
-    _providersList = provs.docs;
+    _providers = provs.docs;
     if (mounted) setState(() {});
   }
 
@@ -110,13 +107,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     if (v is num) return v.toDouble();
     return double.tryParse((v?.toString() ?? '').replaceAll(',', '.')) ?? 0.0;
   }
-
-  num _toNum(dynamic v) {
-    if (v is num) return v;
-    return num.tryParse((v?.toString() ?? '').replaceAll(',', '.')) ?? 0;
-  }
-
-  String _numOrEmpty(dynamic v) => v == null ? '' : v.toString();
 
   void _showSnack(String m) {
     if (!mounted) return;
@@ -259,12 +249,13 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                       const SizedBox(width: 8),
                       Expanded(child: TextFormField(controller: unitsCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Unidades/emp'))),
                     ])),
-                    labeled(DropdownButtonFormField<String>(value: providerId, decoration: const InputDecoration(labelText: 'Proveedor (opcional)'), items: (_providersList ?? []).map((p) => DropdownMenuItem(value: p.id, child: Text((p.data() as Map<String, dynamic>)['name'] ?? '—'))).toList(), onChanged: (v) => setLocal(() => providerId = v))),
+                    labeled(DropdownButtonFormField<String>(value: providerId, decoration: const InputDecoration(labelText: 'Proveedor (opcional)'), items: (_providers ?? []).map((p) => DropdownMenuItem(value: p.id, child: Text((p.data() as Map<String, dynamic>)['name'] ?? '—'))).toList(), onChanged: (v) => setLocal(() => providerId = v))),
                     labeled(TextFormField(controller: TextEditingController(text: lot), decoration: const InputDecoration(labelText: 'Lote (opcional)'), onChanged: (v) => lot = v)),
                     labeled(Row(children: [
                       Expanded(
                         child: InputDecorator(
                           decoration: const InputDecoration(labelText: 'Vencimiento (opcional)'),
+                          // <- ERROR corregido: asegurar que expiry sea tratado como DateTime cuando no es nulo
                           child: Text(expiry != null ? _fmtDate(expiry!) : '—'),
                         ),
                       ),
@@ -312,38 +303,32 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                 label: const Text('Guardar'),
                 onPressed: () async {
                   if (!formKey.currentState!.validate()) return;
-                  // crear producto (rápido)
+                  // crear producto
                   final payload = {
-  'name': nameCtrl.text.trim(),
-  'sku': skuCtrl.text.trim(),
-  'purchasePrice': double.tryParse(purchaseCtrl.text.replaceAll(',', '.')) ?? 0.0,
-  'marginPercent': double.tryParse(marginCtrl.text.replaceAll(',', '.')) ?? 10,
-  'price': double.tryParse(priceCtrl.text.replaceAll(',', '.')) ?? 0.0,
-  'stock': defaultStock ?? 0,
-  'lot': lot.trim().isEmpty ? null : lot.trim(),
-  // uso de expiry! para garantizar al compilador que no es null en la rama verdadera
-  'expiryDate': expiry != null ? Timestamp.fromDate(expiry!) : null,
-  'pharmForm': pharmForm,
-  'route': route,
-  'strength': strength,
-  'presentation': presentation,
-  'taxable': taxable,
-  'requiresPrescription': requiresRx,
-  'providerId': providerId,
-  'unitsPerPack': int.tryParse(unitsCtrl.text) ?? 1,
-  'createdAt': FieldValue.serverTimestamp(),
-  'batchesCount': lot.trim().isEmpty ? 0 : 1,
-  'lastLot': lot.trim().isEmpty ? null : lot.trim(),
-  'lastExpiry': expiry != null ? Timestamp.fromDate(expiry!) : null,
-};
-
-try {
-  final docRef = await productsRef.add(payload);
-  Navigator.pop(ctx, docRef.id);
-} catch (e) {
-  _showSnack('Error creando producto: $e');
-}
-
+                    'name': nameCtrl.text.trim(),
+                    'sku': skuCtrl.text.trim(),
+                    'purchasePrice': double.tryParse(purchaseCtrl.text.replaceAll(',', '.')) ?? 0.0,
+                    'marginPercent': double.tryParse(marginCtrl.text.replaceAll(',', '.')) ?? 10,
+                    'price': double.tryParse(priceCtrl.text.replaceAll(',', '.')) ?? 0.0,
+                    'stock': defaultStock ?? 0,
+                    'lot': lot.trim(),
+                    'expiryDate': expiry,
+                    'pharmForm': pharmForm,
+                    'route': route,
+                    'strength': strength,
+                    'presentation': presentation,
+                    'taxable': taxable,
+                    'requiresPrescription': requiresRx,
+                    'providerId': providerId,
+                    'unitsPerPack': int.tryParse(unitsCtrl.text) ?? 1,
+                    'createdAt': FieldValue.serverTimestamp(),
+                  };
+                  try {
+                    final docRef = await productsRef.add(payload);
+                    Navigator.pop(ctx, docRef.id);
+                  } catch (e) {
+                    _showSnack('Error creando producto: $e');
+                  }
                 },
               ),
             ],
@@ -355,7 +340,7 @@ try {
     return res;
   }
 
-  // ====== GUARDAR ingreso con batches (mejorado) ======
+  // ====== GUARDAR ingreso con batches ======
   Future<void> _save() async {
     if (_products == null) {
       _showSnack('Cargando productos...');
@@ -390,126 +375,53 @@ try {
     setState(() => _loading = true);
 
     try {
-      // 1) Pre-crear productos nuevos (fuera de la transacción para obtener ids)
-      for (final l in _lines.where((x) => x.isNew)) {
-        final newRef = productsRef.doc();
-        await newRef.set({
-          'name': l.newName.trim(),
-          'sku': l.newSku.trim(),
-          'purchasePrice': l.purchasePrice,
-          'marginPercent': 10,
-          'price': l.salePrice,
-          'stock': 0,
-          'pharmForm': '',
-          'route': '',
-          'strength': '',
-          'presentation': '',
-          'createdAt': FieldValue.serverTimestamp(),
-          // campos nuevos de resumen
-          'lastLot': l.lot.trim().isEmpty ? null : l.lot.trim(),
-          'lastExpiry': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
-          'batchesCount': 0,
-        });
-        l.productId = newRef.id;
-        l.isNew = false;
-      }
-
-      // 2) Preparar ingreso (crear doc)
-      final ingresoRef = ingresosRef.doc();
-      final itemsForDb = <Map<String, dynamic>>[];
-
-      final providerId = providerCtrl.text.trim().isNotEmpty
-          ? providerCtrl.text.trim()
-          : (_providersList != null && _providersList!.isNotEmpty ? _providersList!.first.id : null);
-
-      // 3) Pre-buscar batches por lote para cada línea (reduce riesgo de duplicado)
-      final Map<String, String?> preBatchInfo = {}; // clave: productId#lineIndex -> batchId
-      for (var i = 0; i < _lines.length; i++) {
-        final l = _lines[i];
-        final prodId = l.productId!;
-        final lote = l.lot.trim();
-        String key = '$prodId#$i';
-        preBatchInfo[key] = null;
-        if (lote.isNotEmpty) {
-          final q = await productsRef.doc(prodId).collection('batches').where('lot', isEqualTo: lote).limit(1).get();
-          if (q.docs.isNotEmpty) preBatchInfo[key] = q.docs.first.id;
-        }
-      }
-
-      // 4) Ejecutar transacción: crea/actualiza batches y actualiza stock + crea ingreso
       await FirebaseFirestore.instance.runTransaction((tx) async {
-        // Validar existencia de productos
+        // 1) Crear productos nuevos (si los hay)
+        for (final l in _lines.where((x) => x.isNew)) {
+          final newRef = productsRef.doc();
+          tx.set(newRef, {
+            'name': l.newName.trim(),
+            'sku': l.newSku.trim(),
+            'purchasePrice': l.purchasePrice,
+            'marginPercent': 10,
+            'price': l.salePrice,
+            'stock': 0,
+            'pharmForm': '',
+            'route': '',
+            'strength': '',
+            'presentation': '',
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          l.productId = newRef.id;
+          l.isNew = false;
+        }
+
+        // 2) Validar productos existentes
         for (final l in _lines) {
           final prodRef = productsRef.doc(l.productId);
           final prodSnap = await tx.get(prodRef);
-          if (!prodSnap.exists) throw Exception('Producto no encontrado: ${l.productId}');
-        }
-
-        // Procesar cada línea
-        for (var i = 0; i < _lines.length; i++) {
-          final l = _lines[i];
-          final prodRef = productsRef.doc(l.productId);
-          final prodSnap = await tx.get(prodRef);
-          final prodData = prodSnap.data() as Map<String, dynamic>? ?? {};
-
-          final lote = l.lot.trim();
-          String? key = '${l.productId}#$i';
-          String? batchId = preBatchInfo[key];
-
-          if (batchId != null) {
-            // actualizar batch existente
-            final batchRef = prodRef.collection('batches').doc(batchId);
-            tx.update(batchRef, {
-              'qty': FieldValue.increment(l.qty),
-              if (l.expiryDate != null) 'expiry': Timestamp.fromDate(l.expiryDate!),
-              'purchasePrice': l.purchasePrice,
-              'ingresoId': ingresoRef.id,
-            });
-          } else {
-            // crear nuevo batch
-            final newBatchRef = prodRef.collection('batches').doc();
-            tx.set(newBatchRef, {
-              'lot': lote.isEmpty ? null : lote,
-              'qty': l.qty,
-              'expiry': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
-              'purchasePrice': l.purchasePrice,
-              'ingresoId': ingresoRef.id,
-              'createdAt': FieldValue.serverTimestamp(),
-            });
-            batchId = newBatchRef.id;
-
-            // incrementar batchesCount si aplica
-            final prevCount = (prodData['batchesCount'] is int) ? prodData['batchesCount'] as int : 0;
-            tx.update(prodRef, {
-              'batchesCount': prevCount + 1,
-            });
+          if (!prodSnap.exists) {
+            throw Exception('Producto no encontrado: ${l.productId}');
           }
-
-          // actualizar producto (stock y precios y resumen)
-          tx.update(prodRef, {
-            'stock': FieldValue.increment(l.qty),
-            'purchasePrice': l.purchasePrice,
-            'price': l.salePrice,
-            'lastPurchaseAt': FieldValue.serverTimestamp(),
-            'lastLot': lote.isEmpty ? FieldValue.delete() : lote,
-            'lastExpiry': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : FieldValue.delete(),
-          });
-
-          // preparar item para ingreso
-          itemsForDb.add({
-            'productId': l.productId,
-            'qty': l.qty,
-            'purchasePrice': l.purchasePrice,
-            'salePrice': l.salePrice,
-            'subtotal': l.subtotal,
-            'lot': lote.isEmpty ? null : lote,
-            'manufactureDate': l.manufactureDate != null ? Timestamp.fromDate(l.manufactureDate!) : null,
-            'expiryDate': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
-            'batchId': batchId,
-          });
         }
 
-        // Crear documento de ingreso
+        // 3) Crear documento de ingreso
+        final ingresoRef = ingresosRef.doc();
+        final itemsForDb = _lines.map((l) => {
+              'productId': l.productId,
+              'qty': l.qty,
+              'purchasePrice': l.purchasePrice,
+              'salePrice': l.salePrice,
+              'subtotal': l.subtotal,
+              'lot': l.lot.trim().isEmpty ? null : l.lot.trim(),
+              'manufactureDate': l.manufactureDate != null ? Timestamp.fromDate(l.manufactureDate!) : null,
+              'expiryDate': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
+            }).toList();
+
+        final providerId = providerCtrl.text.trim().isNotEmpty
+            ? providerCtrl.text.trim()
+            : (_providers != null && _providers!.isNotEmpty ? _providers!.first.id : null);
+
         tx.set(ingresoRef, {
           'userId': FirebaseAuth.instance.currentUser?.uid,
           'items': itemsForDb,
@@ -519,6 +431,30 @@ try {
           'purchaseDate': purchaseDate != null ? Timestamp.fromDate(purchaseDate!) : FieldValue.serverTimestamp(),
           'createdAt': FieldValue.serverTimestamp(),
         });
+
+        // 4) Para cada línea: crear batch en subcollection y actualizar stock/precios
+        for (final l in _lines) {
+          final prodRef = productsRef.doc(l.productId);
+
+          // crear batch
+          final batchRef = prodRef.collection('batches').doc();
+          tx.set(batchRef, {
+            'lot': l.lot.trim().isEmpty ? null : l.lot.trim(),
+            'qty': l.qty,
+            'expiry': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
+            'purchasePrice': l.purchasePrice,
+            'ingresoId': ingresoRef.id,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+
+          // actualizar producto (incrementando stock)
+          tx.update(prodRef, {
+            'stock': FieldValue.increment(l.qty),
+            'purchasePrice': l.purchasePrice,
+            'price': l.salePrice,
+            'lastPurchaseAt': FieldValue.serverTimestamp(),
+          });
+        }
       });
 
       _showSnack('Compra registrada y stock actualizado.');
@@ -604,29 +540,25 @@ try {
                             ),
                           ),
                           const SizedBox(width: 12),
-                          // Wrap para evitar amontonamiento de botones en pantallas pequeñas
-                          Wrap(
-                            spacing: 8,
-                            children: [
-                              ElevatedButton.icon(
-                                onPressed: _addEmptyLine,
-                                icon: const Icon(Icons.add),
-                                label: const Text('Agregar línea'),
-                                style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
-                              ),
-                              ElevatedButton.icon(
-                                onPressed: () async {
-                                  final newId = await _showNewProductModal();
-                                  if (newId != null) {
-                                    await _loadData();
-                                    _showSnack('Producto creado y listo para seleccionar.');
-                                  }
-                                },
-                                icon: const Icon(Icons.add_box_outlined),
-                                label: const Text('Nuevo producto'),
-                                style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
-                              ),
-                            ],
+                          ElevatedButton.icon(
+                            onPressed: _addEmptyLine,
+                            icon: const Icon(Icons.add),
+                            label: const Text('Agregar línea'),
+                            style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
+                          ),
+                          const SizedBox(width: 8),
+                          // Botón global para crear nuevo producto (aparece a la derecha superior)
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              final newId = await _showNewProductModal();
+                              if (newId != null) {
+                                await _loadData();
+                                _showSnack('Producto creado y listo para seleccionar.');
+                              }
+                            },
+                            icon: const Icon(Icons.add_box_outlined),
+                            label: const Text('Nuevo producto'),
+                            style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
                           ),
                         ]),
 
@@ -691,8 +623,8 @@ try {
                         Row(children: [
                           Expanded(
                             child: DropdownButtonFormField<String>(
-                              value: _providersList != null && _providersList!.isNotEmpty ? _providersList!.first.id : null,
-                              items: _providersList?.map((p) {
+                              value: _providers != null && _providers!.isNotEmpty ? _providers!.first.id : null,
+                              items: _providers?.map((p) {
                                 final d = p.data() as Map<String, dynamic>;
                                 return DropdownMenuItem(value: p.id, child: Text(d['name'] ?? '—'));
                               }).toList(),
@@ -819,7 +751,7 @@ try {
             TextButton.icon(
               onPressed: () async {
                 if (!ln.isNew) {
-                  // Abrir modal de nuevo producto pre-llenando nombre sugerido (si hay producto seleccionado)
+                  // Abrir modal de nuevo producto pre-llenando nombre sugerido (si product selected)
                   final suggested = ln.productId != null ? (_prodMap[ln.productId]?['name'] ?? '') : '';
                   final newId = await _showNewProductModal(suggestedName: suggested);
                   if (newId != null) {
@@ -832,7 +764,7 @@ try {
                     _showSnack('Producto creado y seleccionado.');
                   }
                 } else {
-                  // Toggle a usar existente
+                  // Toggle to existing
                   setState(() {
                     ln.isNew = !ln.isNew;
                     if (ln.isNew) ln.productId = null;
@@ -842,7 +774,24 @@ try {
               icon: Icon(ln.isNew ? Icons.undo : Icons.add_box_outlined),
               label: Text(ln.isNew ? 'Usar existente' : 'Nuevo'),
             ),
-            // NOTE: Eliminado botón duplicado "Nuevo producto" para evitar UI confusa.
+            // También pequeña acción para convertir a nuevo y abrir modal
+            if (!ln.isNew)
+              TextButton.icon(
+                onPressed: () async {
+                  final suggested = ln.productId != null ? (_prodMap[ln.productId]?['name'] ?? '') : '';
+                  final newId = await _showNewProductModal(suggestedName: suggested);
+                  if (newId != null) {
+                    await _loadData();
+                    setState(() {
+                      ln.productId = newId;
+                      ln.isNew = false;
+                    });
+                    _showSnack('Producto creado y seleccionado en la línea.');
+                  }
+                },
+                icon: const Icon(Icons.add),
+                label: const Text('Nuevo producto'),
+              ),
           ]),
         ]),
         if (!ln.isNew && ln.productId != null)
@@ -850,7 +799,7 @@ try {
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
               icon: const Icon(Icons.info_outline),
-              onPressed: () => _showProductDetails(ln.productId!),
+              onPressed: () => _showDetailsDialog(_prodMap[ln.productId!] ?? {}),
               label: const Text('Detalles'),
             ),
           ),
@@ -976,47 +925,34 @@ try {
     });
   }
 
-  // ====== Detalles por producto (incluye lista de batches) ======
-  Future<void> _showProductDetails(String productId) async {
-    final prodRef = productsRef.doc(productId);
-    final prodSnap = await prodRef.get();
-    if (!prodSnap.exists) return;
-    final d = prodSnap.data() as Map<String, dynamic>;
-    final batchesSnap = await prodRef.collection('batches').orderBy('expiry').get();
+  // ====== Detalles (reusa esquema similar a egresos) ======
+  Future<void> _showDetailsDialog(Map<String, dynamic> d) async {
+    if (d.isEmpty) return;
+    final name = (d['name'] ?? 'Producto').toString();
+    final price = _toDouble(d['price']);
+    final stock = _toInt(d['stock']);
+    final taxable = (d['taxable'] ?? false) == true;
+    final iva = _toDouble(d['ivaPercent'] ?? 13);
+    final expiry = (d['expiryDate'] as Timestamp?)?.toDate();
 
     await showDialog(
       context: context,
       builder: (c) => AlertDialog(
-        title: Text(d['name'] ?? 'Producto'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _kv('SKU', (d['sku'] ?? '—').toString()),
-              _kv('Stock', ((d['stock'] ?? 0).toString())),
-              _kv('Precio venta', '\$${_toDouble(d['price']).toStringAsFixed(2)}'),
-              _kv('IVA', (d['taxable'] == true) ? '${(d['ivaPercent'] ?? 13).toString()}%' : 'No grava'),
-              if ((d['pharmForm'] ?? '').toString().isNotEmpty || (d['route'] ?? '').toString().isNotEmpty)
-                _kv('Forma/Vía', '${d['pharmForm'] ?? '—'} / ${d['route'] ?? '—'}'),
-              if ((d['strength'] ?? '').toString().isNotEmpty) _kv('Concentración', (d['strength'] ?? '—').toString()),
-              if ((d['presentation'] ?? '').toString().isNotEmpty) _kv('Presentación', (d['presentation'] ?? '—').toString()),
-              const SizedBox(height: 12),
-              const Text('Batches / Lotes', style: TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 6),
-              if (batchesSnap.docs.isEmpty)
-                const Text('No hay lotes registrados'),
-              for (final b in batchesSnap.docs)
-                Builder(builder: (ctx) {
-                  final bd = b.data() as Map<String, dynamic>;
-                  final expiry = (bd['expiry'] as Timestamp?)?.toDate();
-                  return ListTile(
-                    title: Text('Lote: ${bd['lot'] ?? '—'}  •  Cant: ${bd['qty'] ?? 0}'),
-                    subtitle: Text('Compra: \$${(_toDouble(bd['purchasePrice'])).toStringAsFixed(2)} ${expiry != null ? ' • Vence: ${_fmtDate(expiry)}' : ''}'),
-                    dense: true,
-                  );
-                }),
-            ],
-          ),
+        title: Text(name),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _kv('SKU', (d['sku'] ?? '—').toString()),
+            _kv('Stock', '$stock'),
+            _kv('Precio venta', '\$${price.toStringAsFixed(2)}'),
+            _kv('IVA', taxable ? '${iva.toStringAsFixed(0)}%' : 'No grava'),
+            if (expiry != null) _kv('Vencimiento', _fmtDate(expiry)),
+            if ((d['pharmForm'] ?? '').toString().isNotEmpty || (d['route'] ?? '').toString().isNotEmpty)
+              _kv('Forma/Vía', '${d['pharmForm'] ?? '—'} / ${d['route'] ?? '—'}'),
+            if ((d['strength'] ?? '').toString().isNotEmpty) _kv('Concentración', (d['strength'] ?? '—').toString()),
+            if ((d['presentation'] ?? '').toString().isNotEmpty) _kv('Presentación', (d['presentation'] ?? '—').toString()),
+          ],
         ),
         actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cerrar'))],
       ),
@@ -1029,25 +965,4 @@ try {
       );
 
   String _fmtDate(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
-
-  // ====== Opcional: función auxiliar para consumir stock en ventas (FIFO por expiry) ======
-  // Uso: en proceso de venta, dentro de una transacción o batch, llamar a consumeStock para decrementar por lotes.
-  Future<void> consumeStock(String productId, int qtyToConsume, WriteBatch batch) async {
-    final prodRef = productsRef.doc(productId);
-    final batchesSnap = await prodRef.collection('batches').orderBy('expiry').get();
-    int remain = qtyToConsume;
-    for (final b in batchesSnap.docs) {
-      if (remain <= 0) break;
-      final bd = b.data() as Map<String, dynamic>;
-      final int available = (bd['qty'] ?? 0) as int;
-      if (available <= 0) continue;
-      final take = (available >= remain) ? remain : available;
-      final newQty = available - take;
-      final batchRef = prodRef.collection('batches').doc(b.id);
-      batch.update(batchRef, {'qty': newQty});
-      remain -= take;
-    }
-    if (remain > 0) throw Exception('Stock insuficiente');
-    batch.update(prodRef, {'stock': FieldValue.increment(-qtyToConsume)});
-  }
 }

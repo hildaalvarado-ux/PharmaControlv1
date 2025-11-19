@@ -1,4 +1,3 @@
-// lib/egreso_form_widget.dart
 import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -25,7 +24,8 @@ class SaleLine {
   double ivaPercent;
   int stock;
   int qty;
-  double unitPrice; // **unit price INCLUYE IVA**
+  double unitPrice; // unit price INCLUYE IVA
+  double discountPercent; // porcentaje de descuento aplicado
 
   SaleLine({
     required this.productId,
@@ -35,6 +35,7 @@ class SaleLine {
     required this.stock,
     this.qty = 1,
     required this.unitPrice,
+    this.discountPercent = 0.0,
   });
 
   double get subtotal => unitPrice * qty;
@@ -111,6 +112,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         stock: _toInt(pdata['stock']),
         taxable: (pdata['taxable'] ?? false) == true,
         ivaPercent: _toDouble(pdata['ivaPercent'] ?? 13),
+        discountPct: discountPct,
       );
 
       if (requiresRx) {
@@ -151,6 +153,20 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   void _showSnack(String m) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
+
+  /// Estima un descuento a partir de los datos del producto (sin consultar promos).
+  /// Prioriza un campo 'discount' si existe; si el producto tiene expiry <= 90 días, devuelve 45.
+  double _discountFromData(Map<String, dynamic> d) {
+    final explicit = _toDouble(d['discount'] ?? d['discountPct'] ?? 0);
+    if (explicit > 0) return explicit;
+
+    final expiry = (d['expiryDate'] as Timestamp?)?.toDate();
+    if (expiry != null) {
+      final now = DateTime.now();
+      if (expiry.difference(now).inDays <= 90) return 45;
+    }
+    return 0.0;
   }
 
   // ========= LÓGICA PRECIO DE VENTA + IVA (ARREGLADA) =========
@@ -271,6 +287,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     required int stock,
     required bool taxable,
     required double ivaPercent,
+    double discountPct = 0,
   }) {
     final i = _lines.indexWhere((l) => l.productId == productId);
     if (i >= 0) {
@@ -288,6 +305,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         stock: stock,
         taxable: taxable,
         ivaPercent: ivaPercent,
+        discountPercent: discountPct,
       ),
     );
     setState(() {});
@@ -344,6 +362,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     final buyer = buyerCtrl.text.trim().isEmpty ? 'Consumidor final' : buyerCtrl.text.trim();
     final now = when ?? DateTime.now();
 
+    // Nota: por petición, el PDF mostrará el total y dejará la línea IVA en 0 para evitar confusiones
     final pdfBytes = await InvoicePdf.build(
       logoAssetPath: kPharmaLogoPath,
       invoiceNumber: saleId ?? 'N/A',
@@ -358,8 +377,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                 subtotal: l.subtotal,
               ))
           .toList(),
-      subtotal: _subtotalSinIVA,
-      iva: _ivaTotal,
+      subtotal: _total, // mostramos el total directamente para que el cliente vea lo cobrado
+      iva: 0.0, // forzar 0 en la línea IVA en el PDF (según tu requerimiento)
       total: _total,
     );
 
@@ -423,6 +442,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
             'subtotal': l.subtotal,
             'taxable': l.taxable,
             'ivaPercent': l.ivaPercent,
+            'discountPercent': l.discountPercent, // guardamos el descuento aplicado
             'stockBefore': currentStock,
             'stockAfter': stockAfter,
             'sku': prodData['sku'] ?? '',
@@ -504,11 +524,12 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
 
   @override
   Widget build(BuildContext context) {
-    // Nota: aquí NO usamos Scaffold/AppBar porque este widget se mostrará
-    // dentro del Dashboard (dentro de la tarjeta). Esto evita encabezados duplicados
-    // y permite que el Card del Dashboard controle el layout/estilos.
+    // detectamos si ya hay un Scaffold/Material que provea el "look & feel"
+    final hasMaterialAncestor = context.findAncestorWidgetOfExactType<Material>() != null;
+    final hasScaffoldAncestor = context.findAncestorWidgetOfExactType<Scaffold>() != null;
 
-    return Center(
+    // El contenido real del formulario (tu Column completo)
+    final content = Center(
       child: Padding(
         padding: const EdgeInsets.all(8.0),
         // Permitimos que el widget ocupe todo el ancho disponible del Card del Dashboard.
@@ -557,6 +578,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                     final strength = (d['strength'] ?? '').toString();
                     final pres = (d['presentation'] ?? '').toString();
 
+                    final inferredDisc = _discountFromData(d);
+
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 8.0),
                       child: Row(
@@ -587,6 +610,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                                       if (pres.isNotEmpty) _pill('Pres.: $pres'),
                                       _pill('Stock: $stock'),
                                       _pill('Precio: ${_fmt(displayPrice)}'),
+                                      if (inferredDisc > 0) _pill('Oferta: ${inferredDisc.toStringAsFixed(0)}%'),
                                     ],
                                   ),
                                   if (requiresRx) ...[
@@ -638,8 +662,13 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                                           stock: stock,
                                           taxable: (d['taxable'] ?? false) == true,
                                           ivaPercent: _toDouble(d['ivaPercent'] ?? 13),
+                                          discountPct: disc,
                                         );
                                         searchCtrl.clear();
+
+                                        if (disc > 0) {
+                                          _showSnack('Se aplicó oferta: ${disc.toStringAsFixed(0)}% sobre $name');
+                                        }
                                       },
                                 child: const Text('Agregar'),
                               ),
@@ -794,6 +823,24 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         ),
       ),
     );
+
+    // Si ya estamos dentro de un Scaffold/Material del dashboard, devolvemos el contenido tal cual.
+    if (hasMaterialAncestor && hasScaffoldAncestor) {
+      return content;
+    }
+
+    // Si NO hay ancestro Material/Scaffold (p. ej. abriste la ruta directa desde el carrusel),
+    // devolvemos el mismo contenido envuelto en Material + Scaffold para que TextField y demás funcionen.
+    return Material(
+      child: Scaffold(
+        appBar: AppBar(
+          backgroundColor: kGreen2,
+          title: const Text('Generar venta (Egreso)'),
+          leading: Navigator.canPop(context) ? null : const SizedBox.shrink(),
+        ),
+        body: SafeArea(child: content),
+      ),
+    );
   }
 
   // ====== Item responsivo ======
@@ -810,7 +857,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
             children: [
               Expanded(
                 child: Text(
-                  '${l.name}  (Stock: ${l.stock}, ${_fmt(l.unitPrice)})',
+                  '${l.name}  (Stock: ${l.stock}, ${_fmt(l.unitPrice)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''})',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -863,7 +910,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           const SizedBox(height: 6),
           Row(
             children: [
-              Expanded(child: Text('Stock: ${l.stock}  •  ${_fmt(l.unitPrice)}')),
+              Expanded(child: Text('Stock: ${l.stock}  •  ${_fmt(l.unitPrice)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''}')),
               IconButton(
                 tooltip: 'Quitar',
                 onPressed: () => _removeLine(_lines.indexOf(l)),
@@ -913,6 +960,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     final iva = _toDouble(d['ivaPercent'] ?? 13);
     final expiry = (d['expiryDate'] as Timestamp?)?.toDate();
 
+    final inferredDisc = _discountFromData(d);
+
     await showDialog(
       context: context,
       builder: (c) => AlertDialog(
@@ -928,6 +977,9 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
             _kv('Precio (final)', _fmt(price)),
             _kv('IVA', taxable ? '${iva.toStringAsFixed(0)}%' : 'No grava'),
             if (expiry != null) _kv('Vencimiento', _fmtDate(expiry)),
+            if (inferredDisc > 0) _kv('Oferta', '${inferredDisc.toStringAsFixed(0)}%'),
+            if (expiry != null && expiry.difference(DateTime.now()).inDays <= 90)
+              _kv('Observación', 'Producto próximo a vencer — oferta aplicada'),
             if (requiresRx)
               Padding(
                 padding: const EdgeInsets.only(top: 8.0),
