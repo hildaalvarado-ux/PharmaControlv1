@@ -138,6 +138,8 @@ class _DashboardPageState extends State<DashboardPage> {
         const SizedBox(height: 8),
         _buildMenuTile(icon: Icons.local_offer, title: 'Ofertas', onTap: _openOfertas),
         _buildMenuTile(icon: Icons.production_quantity_limits, title: 'Gestionar productos', onTap: _openProductos),
+        // Inventario también visible para farmacéutico
+        _buildMenuTile(icon: Icons.inventory_2, title: 'Inventario', onTap: _openInventario),
         _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar venta (Factura)', onTap: _openEgresos),
       ],
     );
@@ -184,8 +186,10 @@ class _DashboardPageState extends State<DashboardPage> {
         TextButton(onPressed: _openProveedores, child: const Text("Proveedores", style: TextStyle(color: Colors.white))),
       ]);
     } else if (role == 'farmaceutico' || role == 'farmacéutico') {
+      // Farmacéutico también ve Inventario y Registrar venta en la AppBar
       actions.addAll([
         TextButton(onPressed: _openProductos, child: const Text("Productos", style: TextStyle(color: Colors.white))),
+        TextButton(onPressed: _openInventario, child: const Text("Inventario", style: TextStyle(color: Colors.white))),
         TextButton(onPressed: _openEgresos, child: const Text("Registrar venta", style: TextStyle(color: Colors.white))),
       ]);
     } else if (role == 'vendedor') {
@@ -204,7 +208,8 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _pageUsuarios() => const AdminUserManager();
   Widget _pageProductos() => const AdminProductManager();
   Widget _pageMovimientos() => const MovementsManager();
-  Widget _pageInventario() => Center(child: Text('Inventario (rol: ${_roleNorm()})'));
+  // Reutiliza el gestor de productos para Inventario
+  Widget _pageInventario() => const AdminProductManager();
   Widget _pageEgresos() => EgresoFormWidget();
 
   Widget _cardContentByIndex() {
@@ -361,7 +366,6 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget build(BuildContext context) {
     final bool isMobile = MediaQuery.of(context).size.width < 800;
     final double screenHeight = MediaQuery.of(context).size.height;
-    final bool isEgresos = _selectedIndex == 5;
 
     return WillPopScope(
       onWillPop: () async => false,
@@ -381,37 +385,37 @@ class _DashboardPageState extends State<DashboardPage> {
           child: SafeArea(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                : isEgresos
-                    // Egresos a pantalla completa (sin Scroll/Card externos)
-                    ? _pageEgresos()
-                    // Resto de secciones como antes
-                    : SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            _headerResponsive(isMobile),
-                            const SizedBox(height: 18),
-                            Card(
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                              elevation: 3,
-                              child: Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: _cardContentByIndex(),
-                              ),
-                            ),
-                          ],
+                // ---- Aquí se muestra TODO dentro del mismo layout (header + card)
+                : SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _headerResponsive(isMobile),
+                        const SizedBox(height: 18),
+                        Card(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 3,
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            // El contenido (incluye Egresos) se muestra aquí dentro
+                            child: _cardContentByIndex(),
+                          ),
                         ),
-                      ),
+                      ],
+                    ),
+                  ),
           ),
         ),
-        floatingActionButton: isMobile && !isEgresos
-            ? FloatingActionButton.extended(
-                heroTag: 'fabOfertas',
-                backgroundColor: kGreen2,
-                onPressed: _openOfertas,
-                icon: const Icon(Icons.local_offer, color: Colors.white),
-                label: const Text('Ofertas', style: TextStyle(color: Colors.white)),
-              )
+        floatingActionButton: isMobile
+            ? (_selectedIndex != 5
+                ? FloatingActionButton.extended(
+                    heroTag: 'fabOfertas',
+                    backgroundColor: kGreen2,
+                    onPressed: _openOfertas,
+                    icon: const Icon(Icons.local_offer, color: Colors.white),
+                    label: const Text('Ofertas', style: TextStyle(color: Colors.white)),
+                  )
+                : null)
             : null,
       ),
     );

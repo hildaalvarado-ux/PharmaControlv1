@@ -25,7 +25,7 @@ class SaleLine {
   double ivaPercent;
   int stock;
   int qty;
-  double unitPrice; 
+  double unitPrice; // **unit price INCLUYE IVA**
 
   SaleLine({
     required this.productId,
@@ -98,10 +98,11 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       final pdata = await _fetchProduct(pid);
       if (pdata == null) return;
 
-      final basePrice = _toDouble(pdata['price']);
       final requiresRx = (pdata['requiresPrescription'] ?? false) == true;
       final discountPct = await _bestDiscountFor(pid, pdata);
-      final finalPrice = basePrice * (1 - discountPct / 100);
+
+      // Calculamos precio de venta (incluye IVA si aplica) + aplicamos descuento
+      final finalPrice = _computeSaleUnitPrice(pdata, discountPct);
 
       _addLine(
         productId: pid,
@@ -150,6 +151,69 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   void _showSnack(String m) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  }
+
+  // ========= LÓGICA PRECIO DE VENTA + IVA (ARREGLADA) =========
+  //
+  // Reglas:
+  // - Si el documento tiene 'price' lo tratamos como precio FINAL que ya incluye IVA (usar directamente).
+  // - Si existe 'salePriceNet' (o 'salePrice') lo tratamos como precio NETO (sin IVA): aplicar descuento y luego sumar IVA.
+  // - Si no hay ninguno: tomar 'price' como costo, aplicar margen (marginPercent / profitMargin / markup) para obtener neto,
+  //   aplicar descuento y luego sumar IVA.
+  //
+  // En todos los casos se aplica el descuento (promoción) sobre la base que realmente representa el precio al cliente,
+  // evitando sumar IVA dos veces o recalcular margen cuando ya hay un precio final guardado.
+  double _computeSaleUnitPrice(Map<String, dynamic> pdata, double discountPct) {
+    // indicador si la base que tomamos ya incluye IVA
+    bool baseIncludesIva = false;
+
+    // 1) Preferir 'price' como precio final (incluye IVA) si está presente
+    if (pdata.containsKey('price')) {
+      final p = _toDouble(pdata['price']);
+      // Si 'price' existe, en tu BD suele ser precio final (vi en ejemplo: price = salePriceNet * 1.13)
+      baseIncludesIva = true;
+      double finalPrice = p;
+      // aplicar descuento directamente sobre precio final (que ya incluye IVA)
+      if (discountPct > 0) finalPrice = finalPrice * (1 - discountPct / 100);
+      return finalPrice;
+    }
+
+    // 2) Si existe campo explícito 'salePriceNet' o 'salePrice' (precio sin IVA), usarlo
+    if (pdata.containsKey('salePriceNet')) {
+      double baseNet = _toDouble(pdata['salePriceNet']);
+      if (discountPct > 0) baseNet = baseNet * (1 - discountPct / 100);
+      final iva = _toDouble(pdata['ivaPercent'] ?? 13);
+      final taxable = (pdata['taxable'] ?? false) == true;
+      if (taxable) baseNet = baseNet * (1 + iva / 100);
+      return baseNet;
+    }
+    if (pdata.containsKey('salePrice')) {
+      double baseNet = _toDouble(pdata['salePrice']);
+      if (discountPct > 0) baseNet = baseNet * (1 - discountPct / 100);
+      final iva = _toDouble(pdata['ivaPercent'] ?? 13);
+      final taxable = (pdata['taxable'] ?? false) == true;
+      if (taxable) baseNet = baseNet * (1 + iva / 100);
+      return baseNet;
+    }
+
+    // 3) Fallback: usar 'price' como costo + margin percent si existe (legacy)
+    final cost = _toDouble(pdata['price']);
+    final margin = _toDouble(pdata['marginPercent'] ?? pdata['profitMargin'] ?? pdata['markup'] ?? 0);
+    double baseNet;
+    if (margin != 0) {
+      baseNet = cost * (1 + margin / 100);
+    } else {
+      // si no hay margen ni price neto, asumimos 'price' es ya price neto (lo tomamos como base neta)
+      baseNet = cost;
+    }
+
+    if (discountPct > 0) baseNet = baseNet * (1 - discountPct / 100);
+
+    final iva = _toDouble(pdata['ivaPercent'] ?? 13);
+    final taxable = (pdata['taxable'] ?? false) == true;
+    if (taxable) baseNet = baseNet * (1 + iva / 100);
+
+    return baseNet;
   }
 
   // ========= Descuentos =========
@@ -245,6 +309,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   }
 
   double get _total => _lines.fold(0.0, (s, l) => s + l.subtotal);
+
+  // _ivaTotal asume que l.unitPrice incluye IVA (por eso despejamos la porción IVA)
   double get _ivaTotal {
     double t = 0;
     for (final l in _lines) {
@@ -279,7 +345,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     final now = when ?? DateTime.now();
 
     final pdfBytes = await InvoicePdf.build(
-      logoAssetPath: kPharmaLogoPath,          // <-- aquí mandamos 'assets/logo.png'
+      logoAssetPath: kPharmaLogoPath,
       invoiceNumber: saleId ?? 'N/A',
       date: now,
       buyer: buyer,
@@ -300,7 +366,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     await pdf_out.outputPdf(pdfBytes, 'factura_${saleId ?? "venta"}.pdf');
   }
 
-  // ========= Guardar (con ID incremental desde 1000) =========
+  // ========= Guardar (transaccional, crea 'egresos' y 'movements') =========
 
   Future<void> _save() async {
     if (_lines.isEmpty) {
@@ -314,13 +380,12 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
 
     setState(() => _loading = true);
     try {
-      late String createdId;               // será el número consecutivo como string
+      late String createdId;
       final nowWhen = DateTime.now();
 
       await FirebaseFirestore.instance.runTransaction((tx) async {
         // 1) Obtener/inicializar contador
-        final counterRef =
-            FirebaseFirestore.instance.collection('counters').doc('egresos');
+        final counterRef = FirebaseFirestore.instance.collection('counters').doc('egresos');
         final counterSnap = await tx.get(counterRef);
 
         int nextNumber;
@@ -333,41 +398,44 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
 
         // 2) Usar ese número como ID del egreso
         createdId = nextNumber.toString();
-        final docRef = salesRef.doc(createdId);
+        final egresoDocRef = salesRef.doc(createdId);
 
-        // 3) Validaciones de stock
+        // 3) Preparar items con stockBefore/After y validaciones
+        final List<Map<String, dynamic>> itemsForSave = [];
         for (final l in _lines) {
-          final ref = productsRef.doc(l.productId);
-          final snap = await tx.get(ref);
-          if (!snap.exists) {
+          final prodRef = productsRef.doc(l.productId);
+          final prodSnap = await tx.get(prodRef);
+          if (!prodSnap.exists) {
             throw Exception('Producto no encontrado: ${l.name}');
           }
-          final currentStock = _toInt((snap.data() as Map<String, dynamic>)['stock']);
+          final prodData = prodSnap.data() as Map<String, dynamic>;
+          final currentStock = _toInt(prodData['stock']);
           if (l.qty > currentStock) {
             throw Exception('Stock insuficiente para "${l.name}". Disponible: $currentStock');
           }
+          final stockAfter = currentStock - l.qty;
+
+          itemsForSave.add({
+            'productId': l.productId,
+            'productName': l.name,
+            'qty': l.qty,
+            'unitPrice': l.unitPrice, // incluye IVA
+            'subtotal': l.subtotal,
+            'taxable': l.taxable,
+            'ivaPercent': l.ivaPercent,
+            'stockBefore': currentStock,
+            'stockAfter': stockAfter,
+            'sku': prodData['sku'] ?? '',
+          });
         }
 
-        // 4) Preparar items
-        final items = _lines
-            .map((l) => {
-                  'productId': l.productId,
-                  'name': l.name,
-                  'qty': l.qty,
-                  'unitPrice': l.unitPrice,
-                  'subtotal': l.subtotal,
-                  'taxable': l.taxable,
-                  'ivaPercent': l.ivaPercent,
-                })
-            .toList();
-
-        // 5) Guardar egreso con ese ID y el número
-        tx.set(docRef, {
-          'number': nextNumber, // <--- campo número humano
+        // 4) Guardar egreso
+        tx.set(egresoDocRef, {
+          'number': nextNumber,
           'userId': FirebaseAuth.instance.currentUser?.uid,
           'buyer': buyerCtrl.text.trim().isEmpty ? 'Consumidor final' : buyerCtrl.text.trim(),
           'notes': notesCtrl.text.trim(),
-          'items': items,
+          'items': itemsForSave,
           'subtotal': _subtotalSinIVA,
           'ivaTotal': _ivaTotal,
           'total': _total,
@@ -375,14 +443,36 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           'recipeChecked': _anyRequiresRecipe() ? _recipeChecked : null,
         });
 
-        // 6) Descontar stock
-        for (final l in _lines) {
-          final ref = productsRef.doc(l.productId);
+        // 5) Actualizar stock
+        for (final it in itemsForSave) {
+          final ref = productsRef.doc(it['productId'] as String);
           tx.update(ref, {
-            'stock': FieldValue.increment(-l.qty),
+            'stock': it['stockAfter'],
             'lastSaleAt': FieldValue.serverTimestamp(),
           });
         }
+
+        // 6) Crear resumen en 'movements' (para que MovementsManager lo muestre)
+        final movementsRef = FirebaseFirestore.instance.collection('movements');
+        final movementDocRef = movementsRef.doc();
+
+        final currentUser = FirebaseAuth.instance.currentUser;
+        final createdByName = currentUser?.displayName ?? currentUser?.email ?? 'Usuario';
+
+        tx.set(movementDocRef, {
+          'type': 'egreso',
+          'egresoId': createdId,
+          'createdAt': FieldValue.serverTimestamp(),
+          'createdByUid': currentUser?.uid,
+          'createdByName': createdByName,
+          'note': notesCtrl.text.trim(),
+          'counterpartyType': 'cliente',
+          'counterpartyName': buyerCtrl.text.trim().isEmpty ? 'Consumidor final' : buyerCtrl.text.trim(),
+          'totalItems': itemsForSave.fold<int>(0, (s, it) => s + (it['qty'] as int)),
+          'totalAmount': _total,
+          'items': itemsForSave,
+          'recipeChecked': _anyRequiresRecipe() ? _recipeChecked : null,
+        });
 
         // 7) Incrementar contador
         if (counterSnap.exists) {
@@ -393,10 +483,16 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       });
 
       _showSnack('Venta registrada.');
-      // Mostrar/descargar/imprimir PDF con el número como invoiceNumber
       await _printCurrentInvoice(saleId: createdId, when: nowWhen);
 
-      if (mounted) Navigator.pop(context);
+      // Si la forma está embebida en el Dashboard: limpiar, si fue push: pop con resultado.
+      if (mounted) {
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context, {'createdId': createdId});
+        } else {
+          _clearAll();
+        }
+      }
     } catch (e) {
       _showSnack('No se pudo registrar la venta: $e');
     } finally {
@@ -408,298 +504,293 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Generar venta (Egreso)'), backgroundColor: kGreen2),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1100),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            // Scroll ÚNICO para evitar overflow
-            child: Card(
-              elevation: 8,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Generar venta (Egreso)',
-                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: kGreen1)),
-                  const SizedBox(height: 12),
+    // Nota: aquí NO usamos Scaffold/AppBar porque este widget se mostrará
+    // dentro del Dashboard (dentro de la tarjeta). Esto evita encabezados duplicados
+    // y permite que el Card del Dashboard controle el layout/estilos.
 
-                  // BUSCADOR
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.green.shade100),
-                    ),
-                    child: TextField(
-                      controller: searchCtrl,
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
-                        hintText: 'Buscar producto por nombre, descripción o SKU...',
-                        border: InputBorder.none,
-                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-                      ),
-                    ),
-                  ),
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        // Permitimos que el widget ocupe todo el ancho disponible del Card del Dashboard.
+        child: SingleChildScrollView(
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            // <-- Encabezado removido intencionalmente (lo pediste)
+            const SizedBox(height: 4),
 
-                  if (_filtered.isNotEmpty) const SizedBox(height: 10),
+            // BUSCADOR
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green.shade100),
+              ),
+              child: TextField(
+                controller: searchCtrl,
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  hintText: 'Buscar producto por nombre, descripción o SKU...',
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                ),
+              ),
+            ),
 
-                  // SUGERENCIAS
-                  if (_filtered.isNotEmpty)
-                    Container(
-                      constraints: const BoxConstraints(maxHeight: 260),
-                      child: ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: _filtered.length,
-                        itemBuilder: (context, i) {
-                          final pdoc = _filtered[i];
-                          final d = pdoc.data() as Map<String, dynamic>;
-                          final name = (d['name'] ?? 'Producto').toString();
-                          final price = _toDouble(d['price']);
-                          final stock = _toInt(d['stock']);
-                          final requiresRx = (d['requiresPrescription'] ?? false) == true;
-                          final form = (d['pharmForm'] ?? '').toString();
-                          final route = (d['route'] ?? '').toString();
-                          final strength = (d['strength'] ?? '').toString();
-                          final pres = (d['presentation'] ?? '').toString();
+            if (_filtered.isNotEmpty) const SizedBox(height: 10),
 
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8.0),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Expanded(
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.green.shade100,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(name,
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(fontWeight: FontWeight.bold)),
-                                        const SizedBox(height: 4),
-                                        Wrap(
-                                          spacing: 10,
-                                          runSpacing: 6,
-                                          children: [
-                                            if (form.isNotEmpty || route.isNotEmpty)
-                                              _pill('${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
-                                            if (strength.isNotEmpty) _pill('Conc.: $strength'),
-                                            if (pres.isNotEmpty) _pill('Pres.: $pres'),
-                                            _pill('Stock: $stock'),
-                                            _pill('Precio: ${_fmt(price)}'),
-                                          ],
-                                        ),
-                                        if (requiresRx) ...[
-                                          const SizedBox(height: 6),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                                            decoration: BoxDecoration(
-                                              color: Colors.red.shade50,
-                                              borderRadius: BorderRadius.circular(8),
-                                              border: Border.all(color: Colors.red.shade300),
-                                            ),
-                                            child: const Text(
-                                              'Este producto requiere receta médica.',
-                                              style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
-                                            ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
+            // SUGERENCIAS
+            if (_filtered.isNotEmpty)
+              Container(
+                constraints: const BoxConstraints(maxHeight: 260),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _filtered.length,
+                  itemBuilder: (context, i) {
+                    final pdoc = _filtered[i];
+                    final d = pdoc.data() as Map<String, dynamic>;
+                    final name = (d['name'] ?? 'Producto').toString();
+                    // Mostrar 'price' (si existe) porque suele ser precio final (incluye IVA)
+                    final displayPrice = _toDouble(d['price']);
+                    final stock = _toInt(d['stock']);
+                    final requiresRx = (d['requiresPrescription'] ?? false) == true;
+                    final form = (d['pharmForm'] ?? '').toString();
+                    final route = (d['route'] ?? '').toString();
+                    final strength = (d['strength'] ?? '').toString();
+                    final pres = (d['presentation'] ?? '').toString();
+
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.green.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(name,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  const SizedBox(height: 4),
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 6,
+                                    children: [
+                                      if (form.isNotEmpty || route.isNotEmpty)
+                                        _pill('${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
+                                      if (strength.isNotEmpty) _pill('Conc.: $strength'),
+                                      if (pres.isNotEmpty) _pill('Pres.: $pres'),
+                                      _pill('Stock: $stock'),
+                                      _pill('Precio: ${_fmt(displayPrice)}'),
+                                    ],
                                   ),
-                                ),
-                                const SizedBox(width: 8),
-                                Column(
-                                  children: [
-                                    ElevatedButton(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green,
-                                        foregroundColor: Colors.white,
+                                  if (requiresRx) ...[
+                                    const SizedBox(height: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red.shade50,
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(color: Colors.red.shade300),
                                       ),
-                                      onPressed: () => _showDetailsDialog(d),
-                                      child: const Text('Detalles'),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    ElevatedButton(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: Colors.green,
-                                        foregroundColor: Colors.white,
+                                      child: const Text(
+                                        'Este producto requiere receta médica.',
+                                        style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
                                       ),
-                                      onPressed: stock <= 0
-                                          ? null
-                                          : () async {
-                                              final disc = await _bestDiscountFor(pdoc.id, d);
-                                              final finalPrice = price * (1 - disc / 100);
-                                              _addLine(
-                                                productId: pdoc.id,
-                                                name: name,
-                                                unitPrice: finalPrice,
-                                                stock: stock,
-                                                taxable: (d['taxable'] ?? false) == true,
-                                                ivaPercent: _toDouble(d['ivaPercent'] ?? 13),
-                                              );
-                                              searchCtrl.clear();
-                                            },
-                                      child: const Text('Agregar'),
                                     ),
                                   ],
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
-                          );
-                        },
-                      ),
-                    ),
-
-                  const SizedBox(height: 12),
-
-                  // ENCABEZADO (solo en ancho medio/alto)
-                  LayoutBuilder(builder: (context, cons) {
-                    final isNarrow = cons.maxWidth < 560;
-                    return Column(children: [
-                      if (!isNarrow)
-                        Container(
-                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                          decoration:
-                              BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(6)),
-                          child: Row(children: const [
-                            Expanded(child: Text('Producto')),
-                            SizedBox(width: 100, child: Text('Cant.')),
-                            SizedBox(width: 100, child: Text('Precio')),
-                            SizedBox(width: 120, child: Text('Subtotal')),
-                            SizedBox(width: 40, child: Text('')),
-                          ]),
-                        ),
-                      const SizedBox(height: 8),
-
-                      // ÁREA VERDE con las líneas
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.green.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.green.shade100),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6.0),
-                          child: _lines.isEmpty
-                              ? const Padding(
-                                  padding: EdgeInsets.all(16.0),
-                                  child: Center(child: Text('No hay productos agregados.')))
-                              : ListView.builder(
-                                  shrinkWrap: true,
-                                  physics: const NeverScrollableScrollPhysics(),
-                                  itemCount: _lines.length,
-                                  itemBuilder: (context, i) => _lineTile(_lines[i], isNarrow),
+                          ),
+                          const SizedBox(width: 8),
+                          Column(
+                            children: [
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
                                 ),
-                        ),
+                                onPressed: () => _showDetailsDialog(d),
+                                child: const Text('Detalles'),
+                              ),
+                              const SizedBox(height: 8),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                  foregroundColor: Colors.white,
+                                ),
+                                onPressed: stock <= 0
+                                    ? null
+                                    : () async {
+                                        final disc = await _bestDiscountFor(pdoc.id, d);
+                                        // Ahora finalPrice = precio de venta correcto (incluye IVA) con descuento aplicado
+                                        final finalPrice = _computeSaleUnitPrice(d, disc);
+                                        _addLine(
+                                          productId: pdoc.id,
+                                          name: name,
+                                          unitPrice: finalPrice,
+                                          stock: stock,
+                                          taxable: (d['taxable'] ?? false) == true,
+                                          ivaPercent: _toDouble(d['ivaPercent'] ?? 13),
+                                        );
+                                        searchCtrl.clear();
+                                      },
+                                child: const Text('Agregar'),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                    ]);
-                  }),
+                    );
+                  },
+                ),
+              ),
 
-                  const SizedBox(height: 12),
+            const SizedBox(height: 12),
 
-                  // L / C / I  (acciones rápidas)
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 8,
+            // ENCABEZADO (solo en ancho medio/alto)
+            LayoutBuilder(builder: (context, cons) {
+              final isNarrow = cons.maxWidth < 560;
+              return Column(children: [
+                if (!isNarrow)
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                    decoration:
+                        BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(6)),
+                    child: Row(children: const [
+                      Expanded(child: Text('Producto')),
+                      SizedBox(width: 100, child: Text('Cant.')),
+                      SizedBox(width: 100, child: Text('Precio')),
+                      SizedBox(width: 120, child: Text('Subtotal')),
+                      SizedBox(width: 40, child: Text('')),
+                    ]),
+                  ),
+                const SizedBox(height: 8),
+
+                // ÁREA VERDE con las líneas
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green.shade100),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6.0),
+                    child: _lines.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.all(16.0),
+                            child: Center(child: Text('No hay productos agregados.')))
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _lines.length,
+                            itemBuilder: (context, i) => _lineTile(_lines[i], isNarrow),
+                          ),
+                  ),
+                ),
+              ]);
+            }),
+
+            const SizedBox(height: 12),
+
+            // L / C / I  (acciones rápidas)
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              children: [
+                ElevatedButton(
+                  onPressed: _lines.isEmpty && buyerCtrl.text.isEmpty && notesCtrl.text.isEmpty ? null : _clearAll,
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                  child: const Text('L  •  Limpiar'),
+                ),
+                ElevatedButton(
+                  onPressed: null, // reservado para "C"
+                  style:
+                      ElevatedButton.styleFrom(backgroundColor: Colors.black12, foregroundColor: Colors.black54),
+                  child: const Text('C  •  Próximamente'),
+                ),
+                ElevatedButton(
+                  onPressed: _lines.isEmpty ? null : () => _printCurrentInvoice(),
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                  child: const Text('I  •  Imprimir PDF'),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+
+            TextFormField(
+              controller: buyerCtrl,
+              decoration: const InputDecoration(labelText: 'Cliente o comprador (opcional)'),
+            ),
+            const SizedBox(height: 8),
+            TextFormField(
+              controller: notesCtrl,
+              decoration: const InputDecoration(labelText: 'Notas adicionales'),
+            ),
+
+            if (_anyRequiresRecipe())
+              Padding(
+                padding: const EdgeInsets.only(top: 10.0),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.orange.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      ElevatedButton(
-                        onPressed: _lines.isEmpty && buyerCtrl.text.isEmpty && notesCtrl.text.isEmpty ? null : _clearAll,
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                        child: const Text('L  •  Limpiar'),
-                      ),
-                      ElevatedButton(
-                        onPressed: null, // reservado para "C"
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.black12, foregroundColor: Colors.black54),
-                        child: const Text('C  •  Próximamente'),
-                      ),
-                      ElevatedButton(
-                        onPressed: _lines.isEmpty ? null : () => _printCurrentInvoice(),
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                        child: const Text('I  •  Imprimir PDF'),
+                      const Text('Hay productos de venta bajo receta en esta venta.',
+                          style: TextStyle(fontWeight: FontWeight.w600)),
+                      SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        activeColor: kGreen2,
+                        title: const Text('Receta médica verificada'),
+                        value: _recipeChecked,
+                        onChanged: (v) => setState(() => _recipeChecked = v),
                       ),
                     ],
                   ),
+                ),
+              ),
 
-                  const SizedBox(height: 12),
+            const SizedBox(height: 12),
 
-                  TextFormField(
-                    controller: buyerCtrl,
-                    decoration: const InputDecoration(labelText: 'Cliente o comprador (opcional)'),
+            // Totales + botón guardar
+            Align(
+              alignment: Alignment.centerRight,
+              child: Wrap(
+                spacing: 16,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('Subtotal (sin IVA): ${_fmt(_subtotalSinIVA)}'),
+                      Text('IVA: ${_fmt(_ivaTotal)}'),
+                      Text('Total: ${_fmt(_total)}',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    ],
                   ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    controller: notesCtrl,
-                    decoration: const InputDecoration(labelText: 'Notas adicionales'),
+                  ElevatedButton(
+                    style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
+                    onPressed: _loading ? null : _save,
+                    child: _loading
+                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('Registrar venta'),
                   ),
-
-                  if (_anyRequiresRecipe())
-                    Padding(
-                      padding: const EdgeInsets.only(top: 10.0),
-                      child: Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.orange.shade300),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text('Hay productos de venta bajo receta en esta venta.',
-                                style: TextStyle(fontWeight: FontWeight.w600)),
-                            SwitchListTile(
-                              contentPadding: EdgeInsets.zero,
-                              activeColor: kGreen2,
-                              title: const Text('Receta médica verificada'),
-                              value: _recipeChecked,
-                              onChanged: (v) => setState(() => _recipeChecked = v),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                  const SizedBox(height: 12),
-
-                  // Totales + botón guardar
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Wrap(
-                      spacing: 16,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text('Subtotal (sin IVA): ${_fmt(_subtotalSinIVA)}'),
-                            Text('IVA: ${_fmt(_ivaTotal)}'),
-                            Text('Total: ${_fmt(_total)}',
-                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
-                          onPressed: _loading ? null : _save,
-                          child: _loading
-                              ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
-                              : const Text('Registrar venta'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ]),
+                ],
               ),
             ),
-          ),
+          ]),
         ),
       ),
     );

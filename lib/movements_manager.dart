@@ -3,22 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'ingreso_form.dart';
 import 'egreso_form.dart';
-/// Colección principal usada por tu app para productos
-/// ya existe como 'products'. Aquí agregamos 'movements'.
-///
-/// Estructura sugerida de un documento en 'movements':
-/// {
-///   type: 'ingreso' | 'egreso',
-///   createdAt: Timestamp,
-///   createdByUid: String,
-///   createdByName: String,
-///   note: String?,
-///   counterpartyType: 'cliente' | 'proveedor' | null,
-///   counterpartyName: String?,
-///   totalItems: int,
-///   totalAmount: double,
-///   items: [ ... ]
-/// }
+
+/// Colección 'movements' usada por la UI de Movimientos.
 
 class MovementsManager extends StatefulWidget {
   const MovementsManager({super.key});
@@ -33,9 +19,8 @@ class _MovementsManagerState extends State<MovementsManager> {
   final _movementsRef = FirebaseFirestore.instance.collection('movements');
 
   _View _view = _View.all;
-  bool _busy = false; // Conservado (no se usa para formularios aquí)
+  bool _busy = false;
 
-  // Filtro rápido por rango de fechas (opcional)
   DateTime? _from;
   DateTime? _to;
 
@@ -56,9 +41,7 @@ class _MovementsManagerState extends State<MovementsManager> {
       case _View.all:
         break;
     }
-    if (_from != null) {
-      q = q.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_from!));
-    }
+    if (_from != null) q = q.where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(_from!));
     if (_to != null) {
       final toEnd = DateTime(_to!.year, _to!.month, _to!.day, 23, 59, 59, 999);
       q = q.where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(toEnd));
@@ -72,19 +55,25 @@ class _MovementsManagerState extends State<MovementsManager> {
       context: context,
       firstDate: DateTime(now.year - 2),
       lastDate: DateTime(now.year + 2),
-      initialDateRange: (_from != null && _to != null)
-          ? DateTimeRange(start: _from!, end: _to!)
-          : null,
+      initialDateRange: (_from != null && _to != null) ? DateTimeRange(start: _from!, end: _to!) : null,
     );
-    if (res != null) {
-      setState(() {
-        _from = res.start;
-        _to = res.end;
-      });
-    }
+    if (res != null) setState(() { _from = res.start; _to = res.end; });
   }
 
-  // --- UI ---
+  // Navegar a formulario en pantalla completa usando wrappers
+  Future<void> _openIngresoFullScreen() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const IngresoPage()));
+    // cuando vuelva, el stream actualiza automáticamente; si quisieras forzar recarga, setState() aquí.
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  Future<void> _openEgresoFullScreen() async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const EgresoPage()));
+    if (!mounted) return;
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -98,7 +87,6 @@ class _MovementsManagerState extends State<MovementsManager> {
               style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
             ),
             const Spacer(),
-            // Toggle de vistas: Todos / Ingresos / Egresos
             SegmentedButton<_View>(
               segments: const [
                 ButtonSegment(value: _View.all, label: Text('Todos'), icon: Icon(Icons.all_inbox)),
@@ -109,7 +97,6 @@ class _MovementsManagerState extends State<MovementsManager> {
               onSelectionChanged: (s) => setState(() => _view = s.first),
             ),
             const SizedBox(width: 12),
-            // Rango de fechas
             OutlinedButton.icon(
               onPressed: _pickDateRange,
               icon: const Icon(Icons.date_range),
@@ -127,27 +114,18 @@ class _MovementsManagerState extends State<MovementsManager> {
               ),
             const SizedBox(width: 12),
 
-            // ---------- SOLO CAMBIOS AQUÍ: botones que NAVEGAN ----------
+            // Botones: ahora abren páginas completas (wrappers)
             FilledButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const IngresoFormWidget()),
-                );
-              },
+              onPressed: _openIngresoFullScreen,
               icon: const Icon(Icons.add_shopping_cart),
               label: const Text('Nuevo ingreso'),
             ),
             const SizedBox(width: 8),
             FilledButton.icon(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const EgresoFormWidget()),
-                );
-              },
+              onPressed: _openEgresoFullScreen,
               icon: const Icon(Icons.move_to_inbox),
               label: const Text('Nuevo egreso'),
             ),
-            // -----------------------------------------------------------
           ],
         ),
         const SizedBox(height: 12),
@@ -188,8 +166,7 @@ class _MovementsManagerState extends State<MovementsManager> {
                             children: [
                               if (dt != null) Text('${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}'),
                               Text('Líneas: ${m['totalItems'] ?? items.length} • Total: ${(m['totalAmount'] ?? 0).toString()}'),
-                              if ((m['counterpartyName'] ?? '') != '')
-                                Text(m['type'] == 'ingreso' ? 'Cliente: ${m['counterpartyName']}' : 'Proveedor: ${m['counterpartyName']}'),
+                              if ((m['counterpartyName'] ?? '') != '') Text(m['type'] == 'ingreso' ? 'Cliente: ${m['counterpartyName']}' : 'Proveedor: ${m['counterpartyName']}'),
                               if ((m['note'] ?? '') != '') Text('Nota: ${m['note']}'),
                             ],
                           ),
@@ -281,6 +258,69 @@ class _MovementsManagerState extends State<MovementsManager> {
           },
         ),
       ],
+    );
+  }
+}
+
+/// ----- Wrappers para abrir formularios en pantalla completa -----
+/// Las páginas abajo envuelven los widgets de formulario embebibles
+/// en un Scaffold con AppBar para evitar errores de Material cuando
+/// se navega con Navigator.push(...).
+
+class EgresoPage extends StatelessWidget {
+  const EgresoPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Generar venta (Egreso)'),
+        backgroundColor: Colors.green,
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: const EgresoFormWidget(), // el widget embebible
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class IngresoPage extends StatelessWidget {
+  const IngresoPage({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Nuevo ingreso'),
+        backgroundColor: Colors.green,
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Card(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: const IngresoFormWidget(),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
