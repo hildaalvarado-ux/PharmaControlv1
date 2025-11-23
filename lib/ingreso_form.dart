@@ -152,7 +152,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
   List<QueryDocumentSnapshot> get _filteredProducts {
     if ((_products == null) || (_products!.isEmpty)) return [];
     final q = productFilterCtrl.text.trim().toLowerCase();
-    if (q.isEmpty) return _products!;
+    if (q.isEmpty) return [];
     return _products!.where((p) {
       final d = p.data() as Map<String, dynamic>;
       final name = (d['name'] as String? ?? '').toLowerCase();
@@ -182,7 +182,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     productFilterCtrl.clear();
   }
 
-  // ==== Generar siguiente SKU simple (similar al admin)
+  // ==== Generar siguiente SKU simple
   Future<String> _generateNextSku() async {
     try {
       final q = await productsRef.orderBy('sku', descending: true).limit(1).get();
@@ -206,22 +206,28 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     }
   }
 
-  // ==== Modal: crear producto rápido (reutilizable dentro de ingresos)
-  Future<String?> _showNewProductModal({String? suggestedName, int? defaultStock}) async {
+  // ==== Modal: crear producto rápido
+  Future<String?> _showNewProductModal({String? suggestedName, int? defaultStock, Map<String, dynamic>? baseProduct}) async {
     final nameCtrl = TextEditingController(text: suggestedName ?? '');
     final skuCtrl = TextEditingController(text: await _generateNextSku());
-    final purchaseCtrl = TextEditingController();
-    final marginCtrl = TextEditingController(text: '10');
-    final priceCtrl = TextEditingController();
-    final unitsCtrl = TextEditingController(text: '1');
-    String pharmForm = '';
-    String route = '';
-    String strength = '';
-    String presentation = '';
-    String lot = '';
-    DateTime? expiry;
-    bool taxable = false;
-    bool requiresRx = false;
+    final purchaseCtrl = TextEditingController(
+      text: baseProduct != null ? _toDouble(baseProduct['purchasePrice']).toStringAsFixed(2) : '',
+    );
+    final marginCtrl = TextEditingController(
+      text: (baseProduct != null ? _toDouble(baseProduct['marginPercent'] ?? 10) : 10.0).toStringAsFixed(0),
+    );
+    final priceCtrl = TextEditingController(
+      text: baseProduct != null ? _toDouble(baseProduct['price']).toStringAsFixed(2) : '',
+    );
+    final unitsCtrl = TextEditingController(text: '${baseProduct?['unitsPerPack'] ?? 1}');
+    String pharmForm = (baseProduct?['pharmForm'] ?? '').toString();
+    String route = (baseProduct?['route'] ?? '').toString();
+    String strength = (baseProduct?['strength'] ?? '').toString();
+    String presentation = (baseProduct?['presentation'] ?? '').toString();
+    String lot = (baseProduct?['lot'] ?? '').toString();
+    DateTime? expiry = (baseProduct?['expiryDate'] as Timestamp?)?.toDate();
+    bool taxable = (baseProduct?['taxable'] ?? false) == true;
+    bool requiresRx = (baseProduct?['requiresPrescription'] ?? false) == true;
     String? providerId;
 
     final formKey = GlobalKey<FormState>();
@@ -231,31 +237,73 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       barrierDismissible: true,
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setLocal) {
-          Widget labeled(Widget child) => Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: child);
+          Widget labeled(Widget child) =>
+              Padding(padding: const EdgeInsets.symmetric(vertical: 6.0), child: child);
           return AlertDialog(
-            title: Text('Nuevo producto'),
+            title: const Text('Nuevo producto'),
             content: ConstrainedBox(
               constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.75),
               child: SingleChildScrollView(
                 child: Form(
                   key: formKey,
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    labeled(TextFormField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Nombre *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null)),
-                    labeled(TextFormField(controller: skuCtrl, decoration: const InputDecoration(labelText: 'SKU *'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null)),
-                    labeled(TextFormField(controller: purchaseCtrl, keyboardType: TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Precio compra (sin IVA)'), validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null)),
-                    labeled(TextFormField(controller: marginCtrl, keyboardType: TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Margen %'))),
+                    labeled(TextFormField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                    )),
+                    labeled(TextFormField(
+                      controller: skuCtrl,
+                      decoration: const InputDecoration(labelText: 'SKU *'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                    )),
+                    labeled(TextFormField(
+                      controller: purchaseCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Precio compra (sin IVA)'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                    )),
+                    labeled(TextFormField(
+                      controller: marginCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: const InputDecoration(labelText: 'Margen %'),
+                    )),
                     labeled(Row(children: [
-                      Expanded(child: TextFormField(controller: priceCtrl, keyboardType: TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Precio venta (opcional)'))),
+                      Expanded(
+                        child: TextFormField(
+                          controller: priceCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          decoration: const InputDecoration(labelText: 'Precio venta (opcional)'),
+                        ),
+                      ),
                       const SizedBox(width: 8),
-                      Expanded(child: TextFormField(controller: unitsCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Unidades/emp'))),
+                      Expanded(
+                        child: TextFormField(
+                          controller: unitsCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(labelText: 'Unidades/emp'),
+                        ),
+                      ),
                     ])),
-                    labeled(DropdownButtonFormField<String>(value: providerId, decoration: const InputDecoration(labelText: 'Proveedor (opcional)'), items: (_providers ?? []).map((p) => DropdownMenuItem(value: p.id, child: Text((p.data() as Map<String, dynamic>)['name'] ?? '—'))).toList(), onChanged: (v) => setLocal(() => providerId = v))),
-                    labeled(TextFormField(controller: TextEditingController(text: lot), decoration: const InputDecoration(labelText: 'Lote (opcional)'), onChanged: (v) => lot = v)),
+                    labeled(DropdownButtonFormField<String>(
+                      value: providerId,
+                      decoration: const InputDecoration(labelText: 'Proveedor (opcional)'),
+                      items: (_providers ?? [])
+                          .map((p) => DropdownMenuItem(
+                              value: p.id,
+                              child: Text((p.data() as Map<String, dynamic>)['name'] ?? '—')))
+                          .toList(),
+                      onChanged: (v) => setLocal(() => providerId = v),
+                    )),
+                    labeled(TextFormField(
+                      controller: TextEditingController(text: lot),
+                      decoration: const InputDecoration(labelText: 'Lote (opcional)'),
+                      onChanged: (v) => lot = v,
+                    )),
                     labeled(Row(children: [
                       Expanded(
                         child: InputDecorator(
                           decoration: const InputDecoration(labelText: 'Vencimiento (opcional)'),
-                          // <- ERROR corregido: asegurar que expiry sea tratado como DateTime cuando no es nulo
                           child: Text(expiry != null ? _fmtDate(expiry!) : '—'),
                         ),
                       ),
@@ -265,12 +313,16 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                           TextButton(
                             onPressed: () async {
                               final now = DateTime.now();
-                              final d = await showDatePicker(context: context, initialDate: expiry ?? now, firstDate: DateTime(now.year - 5), lastDate: DateTime(now.year + 15));
+                              final d = await showDatePicker(
+                                context: context,
+                                initialDate: expiry ?? now,
+                                firstDate: DateTime(now.year - 5),
+                                lastDate: DateTime(now.year + 15),
+                              );
                               if (d != null) setLocal(() => expiry = d);
                             },
                             child: const Text('Seleccionar'),
                           ),
-                          // Botón para limpiar la fecha seleccionada
                           if (expiry != null)
                             TextButton(
                               onPressed: () => setLocal(() => expiry = null),
@@ -279,16 +331,61 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                         ],
                       ),
                     ])),
-                    labeled(TextFormField(controller: TextEditingController(text: strength), decoration: const InputDecoration(labelText: 'Concentración (opcional)'), onChanged: (v) => strength = v)),
-                    labeled(TextFormField(controller: TextEditingController(text: presentation), decoration: const InputDecoration(labelText: 'Presentación (opcional)'), onChanged: (v) => presentation = v)),
-                    labeled(DropdownButtonFormField<String>(value: pharmForm.isNotEmpty ? pharmForm : null, decoration: const InputDecoration(labelText: 'Forma'), items: const ['Tableta','Cápsula','Jarabe','Gotas','Suspensión','Ungüento','Crema','Solución inyectable','Aerosol','Parche'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (v) => setLocal(() => pharmForm = v ?? ''))),
-                    labeled(DropdownButtonFormField<String>(value: route.isNotEmpty ? route : null, decoration: const InputDecoration(labelText: 'Vía'), items: const ['Oral','Tópica','Oftálmica','Intravenosa','Intramuscular','Subcutánea','Rectal','Vaginal','Inhalatoria'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (v) => setLocal(() => route = v ?? ''))),
+                    labeled(TextFormField(
+                      controller: TextEditingController(text: strength),
+                      decoration: const InputDecoration(labelText: 'Concentración (opcional)'),
+                      onChanged: (v) => strength = v,
+                    )),
+                    labeled(TextFormField(
+                      controller: TextEditingController(text: presentation),
+                      decoration: const InputDecoration(labelText: 'Presentación (opcional)'),
+                      onChanged: (v) => presentation = v,
+                    )),
+                    labeled(DropdownButtonFormField<String>(
+                      value: pharmForm.isNotEmpty ? pharmForm : null,
+                      decoration: const InputDecoration(labelText: 'Forma'),
+                      items: const [
+                        'Tableta',
+                        'Cápsula',
+                        'Jarabe',
+                        'Gotas',
+                        'Suspensión',
+                        'Ungüento',
+                        'Crema',
+                        'Solución inyectable',
+                        'Aerosol',
+                        'Parche'
+                      ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                      onChanged: (v) => setLocal(() => pharmForm = v ?? ''),
+                    )),
+                    labeled(DropdownButtonFormField<String>(
+                      value: route.isNotEmpty ? route : null,
+                      decoration: const InputDecoration(labelText: 'Vía'),
+                      items: const [
+                        'Oral',
+                        'Tópica',
+                        'Oftálmica',
+                        'Intravenosa',
+                        'Intramuscular',
+                        'Subcutánea',
+                        'Rectal',
+                        'Vaginal',
+                        'Inhalatoria'
+                      ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                      onChanged: (v) => setLocal(() => route = v ?? ''),
+                    )),
                     labeled(Row(children: [
-                      Checkbox(value: taxable, onChanged: (v) => setLocal(() => taxable = v ?? false)),
+                      Checkbox(
+                        value: taxable,
+                        onChanged: (v) => setLocal(() => taxable = v ?? false),
+                      ),
                       const SizedBox(width: 6),
                       const Text('Grava IVA'),
                       const SizedBox(width: 16),
-                      Checkbox(value: requiresRx, onChanged: (v) => setLocal(() => requiresRx = v ?? false)),
+                      Checkbox(
+                        value: requiresRx,
+                        onChanged: (v) => setLocal(() => requiresRx = v ?? false),
+                      ),
                       const SizedBox(width: 6),
                       const Text('Bajo receta'),
                     ])),
@@ -303,7 +400,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                 label: const Text('Guardar'),
                 onPressed: () async {
                   if (!formKey.currentState!.validate()) return;
-                  // crear producto
                   final payload = {
                     'name': nameCtrl.text.trim(),
                     'sku': skuCtrl.text.trim(),
@@ -340,7 +436,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     return res;
   }
 
-  // ====== GUARDAR ingreso con batches ======
+  // ====== GUARDAR ingreso con batches + movements ======
   Future<void> _save() async {
     if (_products == null) {
       _showSnack('Cargando productos...');
@@ -370,6 +466,30 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
         _showSnack('Precio de compra inválido en la fila ${i + 1}');
         return;
       }
+    }
+
+    // Determinar proveedor para ingreso y movements
+    String? providerIdForDb;
+    String providerNameForMovement = 'Proveedor';
+
+    if (providerCtrl.text.trim().isNotEmpty) {
+      providerIdForDb = providerCtrl.text.trim();
+      QueryDocumentSnapshot? provDoc;
+      if (_providers != null && _providers!.isNotEmpty) {
+        try {
+          provDoc = _providers!.firstWhere((p) => p.id == providerIdForDb);
+        } catch (_) {}
+      }
+      if (provDoc != null) {
+        final data = provDoc.data() as Map<String, dynamic>;
+        providerNameForMovement = (data['name'] ?? providerNameForMovement).toString();
+      } else {
+        providerNameForMovement = providerIdForDb;
+      }
+    } else if (_providers != null && _providers!.isNotEmpty) {
+      providerIdForDb = _providers!.first.id;
+      final data = _providers!.first.data() as Map<String, dynamic>;
+      providerNameForMovement = (data['name'] ?? 'Proveedor').toString();
     }
 
     setState(() => _loading = true);
@@ -407,29 +527,51 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
 
         // 3) Crear documento de ingreso
         final ingresoRef = ingresosRef.doc();
-        final itemsForDb = _lines.map((l) => {
-              'productId': l.productId,
-              'qty': l.qty,
-              'purchasePrice': l.purchasePrice,
-              'salePrice': l.salePrice,
-              'subtotal': l.subtotal,
-              'lot': l.lot.trim().isEmpty ? null : l.lot.trim(),
-              'manufactureDate': l.manufactureDate != null ? Timestamp.fromDate(l.manufactureDate!) : null,
-              'expiryDate': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
-            }).toList();
-
-        final providerId = providerCtrl.text.trim().isNotEmpty
-            ? providerCtrl.text.trim()
-            : (_providers != null && _providers!.isNotEmpty ? _providers!.first.id : null);
+        final itemsForDb = _lines
+            .map((l) => {
+                  'productId': l.productId,
+                  'qty': l.qty,
+                  'purchasePrice': l.purchasePrice,
+                  'salePrice': l.salePrice,
+                  'subtotal': l.subtotal,
+                  'lot': l.lot.trim().isEmpty ? null : l.lot.trim(),
+                  'manufactureDate': l.manufactureDate != null ? Timestamp.fromDate(l.manufactureDate!) : null,
+                  'expiryDate': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
+                })
+            .toList();
 
         tx.set(ingresoRef, {
           'userId': FirebaseAuth.instance.currentUser?.uid,
           'items': itemsForDb,
           'total': _total,
-          'providerId': providerId,
+          'providerId': providerIdForDb,
           'invoice': invoiceCtrl.text.trim(),
-          'purchaseDate': purchaseDate != null ? Timestamp.fromDate(purchaseDate!) : FieldValue.serverTimestamp(),
+          'purchaseDate':
+              purchaseDate != null ? Timestamp.fromDate(purchaseDate!) : FieldValue.serverTimestamp(),
           'createdAt': FieldValue.serverTimestamp(),
+        });
+
+        // 3b) Crear resumen en 'movements' (igual que egresos, pero tipo ingreso)
+        final movementsRef = FirebaseFirestore.instance.collection('movements');
+        final movementDocRef = movementsRef.doc();
+
+        final currentUser = FirebaseAuth.instance.currentUser;
+        final createdByName = currentUser?.displayName ?? currentUser?.email ?? 'Usuario';
+        final totalItems =
+            itemsForDb.fold<int>(0, (s, it) => s + (it['qty'] as int));
+
+        tx.set(movementDocRef, {
+          'type': 'ingreso',
+          'ingresoId': ingresoRef.id,
+          'createdAt': FieldValue.serverTimestamp(),
+          'createdByUid': currentUser?.uid,
+          'createdByName': createdByName,
+          'note': invoiceCtrl.text.trim(),
+          'counterpartyType': 'proveedor',
+          'counterpartyName': providerNameForMovement,
+          'totalItems': totalItems,
+          'totalAmount': _total,
+          'items': itemsForDb,
         });
 
         // 4) Para cada línea: crear batch en subcollection y actualizar stock/precios
@@ -439,7 +581,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           // crear batch
           final batchRef = prodRef.collection('batches').doc();
           tx.set(batchRef, {
-            'lot': l.lot.trim().isEmpty ? null : l.lot.trim(),
+            'lot': l.lot.trim().isNotEmpty ? l.lot.trim() : null,
             'qty': l.qty,
             'expiry': l.expiryDate != null ? Timestamp.fromDate(l.expiryDate!) : null,
             'purchasePrice': l.purchasePrice,
@@ -508,207 +650,302 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width >= 900;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Registrar compra (Ingreso)'), backgroundColor: kGreen2),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 1100),
-          child: Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: _products == null
-                ? const Center(child: CircularProgressIndicator())
-                : Card(
-                    elevation: 8,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text('Gestión de Compras',
-                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: kGreen1)),
-                        const SizedBox(height: 12),
+    // Detectar si ya hay Scaffold/Material (como en Egresos)
+    final hasMaterialAncestor = context.findAncestorWidgetOfExactType<Material>() != null;
+    final hasScaffoldAncestor = context.findAncestorWidgetOfExactType<Scaffold>() != null;
 
-                        // Filtro superior + agregar línea vacía + botón "Nuevo producto" global
-                        Row(children: [
-                          Expanded(
-                            child: TextField(
-                              controller: productFilterCtrl,
-                              decoration: const InputDecoration(
-                                prefixIcon: Icon(Icons.search),
-                                labelText: 'Buscar producto (nombre, SKU, descripción)',
-                                filled: true,
-                              ),
-                            ),
+    final content = Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1100),
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: _products == null
+              ? const Center(child: CircularProgressIndicator())
+              : Card(
+                  elevation: 8,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('Gestión de Compras',
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: kGreen1)),
+                      const SizedBox(height: 12),
+
+                      // BUSCADOR tipo egresos
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green.shade100),
+                        ),
+                        child: TextField(
+                          controller: productFilterCtrl,
+                          decoration: const InputDecoration(
+                            prefixIcon: Icon(Icons.search),
+                            hintText: 'Buscar producto (nombre, descripción o SKU)...',
+                            border: InputBorder.none,
+                            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                           ),
-                          const SizedBox(width: 12),
-                          ElevatedButton.icon(
-                            onPressed: _addEmptyLine,
-                            icon: const Icon(Icons.add),
-                            label: const Text('Agregar línea'),
-                            style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
-                          ),
-                          const SizedBox(width: 8),
-                          // Botón global para crear nuevo producto (aparece a la derecha superior)
-                          ElevatedButton.icon(
-                            onPressed: () async {
-                              final newId = await _showNewProductModal();
-                              if (newId != null) {
-                                await _loadData();
-                                _showSnack('Producto creado y listo para seleccionar.');
-                              }
+                        ),
+                      ),
+
+                      if (_filteredProducts.isNotEmpty) const SizedBox(height: 10),
+
+                      // SUGERENCIAS
+                      if (_filteredProducts.isNotEmpty)
+                        Container(
+                          constraints: const BoxConstraints(maxHeight: 220),
+                          child: ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: _filteredProducts.length,
+                            itemBuilder: (context, i) {
+                              final p = _filteredProducts[i];
+                              final d = p.data() as Map<String, dynamic>;
+                              final stock = _toInt(d['stock']);
+                              final purchase = _toDouble(d['purchasePrice']);
+                              final margin = _toDouble(d['marginPercent'] ?? 10);
+                              final suggestedSale = purchase * (1 + (margin / 100));
+                              final name = (d['name'] as String?) ?? p.id;
+                              final form = (d['pharmForm'] ?? '').toString();
+                              final route = (d['route'] ?? '').toString();
+                              final strength = (d['strength'] ?? '').toString();
+                              final pres = (d['presentation'] ?? '').toString();
+
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 8.0),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: Colors.green.shade100,
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(name,
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(fontWeight: FontWeight.bold)),
+                                            const SizedBox(height: 4),
+                                            Wrap(
+                                              spacing: 10,
+                                              runSpacing: 6,
+                                              children: [
+                                                if (form.isNotEmpty || route.isNotEmpty)
+                                                  _pill('${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
+                                                if (strength.isNotEmpty) _pill('Conc.: $strength'),
+                                                if (pres.isNotEmpty) _pill('Pres.: $pres'),
+                                                _pill('Stock: $stock'),
+                                                _pill('Compra: \$${purchase.toStringAsFixed(2)}'),
+                                                _pill('Venta sug.: \$${suggestedSale.toStringAsFixed(2)}'),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Column(
+                                      children: [
+                                        ElevatedButton(
+                                          onPressed: () => _showDetailsDialog(d),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.green,
+                                            foregroundColor: Colors.white,
+                                          ),
+                                          child: const Text('Detalles'),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        ElevatedButton(
+                                          onPressed: () => _addFromQuickList(p),
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: Colors.green,
+                                            foregroundColor: Colors.white,
+                                          ),
+                                          child: const Text('Agregar'),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              );
                             },
-                            icon: const Icon(Icons.add_box_outlined),
-                            label: const Text('Nuevo producto'),
-                            style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
                           ),
-                        ]),
-
-                        if (productFilterCtrl.text.trim().isNotEmpty) const SizedBox(height: 8),
-                        if (productFilterCtrl.text.trim().isNotEmpty)
-                          Container(
-                            constraints: const BoxConstraints(maxHeight: 220),
-                            child: ListView.builder(
-                              shrinkWrap: true,
-                              itemCount: _filteredProducts.length,
-                              itemBuilder: (context, i) {
-                                final p = _filteredProducts[i];
-                                final d = p.data() as Map<String, dynamic>;
-                                final stock = _toInt(d['stock']);
-                                final purchase = _toDouble(d['purchasePrice']);
-                                return ListTile(
-                                  title: Text((d['name'] as String?) ?? p.id, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  subtitle: Text(
-                                    'SKU: ${(d['sku'] ?? '—')}  •  Stock: $stock  •  Compra: \$${purchase.toStringAsFixed(2)}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  trailing: ElevatedButton(
-                                    onPressed: () => _addFromQuickList(p),
-                                    style: ElevatedButton.styleFrom(foregroundColor: Colors.white),
-                                    child: const Text('Agregar'),
-                                  ),
-                                  onTap: () => _addFromQuickList(p),
-                                );
-                              },
-                            ),
-                          ),
-
-                        const SizedBox(height: 12),
-
-                        // Encabezado (solo en pantallas medianas/anchas)
-                        if (isWide)
-                          Container(
-                            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                            decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(6)),
-                            child: Row(children: const [
-                              Expanded(child: Text('Producto')),
-                              SizedBox(width: 80, child: Text('Cant.')),
-                              SizedBox(width: 140, child: Text('Compra')),
-                              SizedBox(width: 140, child: Text('Venta sug.')),
-                              SizedBox(width: 40, child: Text('')),
-                            ]),
-                          ),
-                        if (isWide) const SizedBox(height: 8),
-
-                        // Líneas
-                        ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _lines.length,
-                          itemBuilder: (context, idx) => _lineTile(_lines[idx], idx, isWide),
                         ),
 
-                        const SizedBox(height: 12),
+                      const SizedBox(height: 12),
 
-                        // Proveedor, factura, fecha
-                        Row(children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: _providers != null && _providers!.isNotEmpty ? _providers!.first.id : null,
-                              items: _providers?.map((p) {
-                                final d = p.data() as Map<String, dynamic>;
-                                return DropdownMenuItem(value: p.id, child: Text(d['name'] ?? '—'));
-                              }).toList(),
-                              onChanged: (v) => providerCtrl.text = v ?? '',
-                              decoration: const InputDecoration(labelText: 'Proveedor'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          SizedBox(
-                            width: 220,
-                            child: TextFormField(
-                              controller: invoiceCtrl,
-                              decoration: const InputDecoration(labelText: 'N° factura / serie'),
-                            ),
-                          ),
-                        ]),
-                        const SizedBox(height: 8),
-                        Row(children: [
-                          Expanded(
-                            child: Text(
-                              purchaseDate == null
-                                  ? 'Fecha de compra: —'
-                                  : 'Compra: ${purchaseDate!.day.toString().padLeft(2, '0')}/${purchaseDate!.month.toString().padLeft(2, '0')}/${purchaseDate!.year}',
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: () async {
-                              final now = DateTime.now();
-                              final d = await showDatePicker(
-                                context: context,
-                                initialDate: purchaseDate ?? now,
-                                firstDate: DateTime(now.year - 5),
-                                lastDate: DateTime(now.year + 1),
-                              );
-                              if (d != null) setState(() => purchaseDate = d);
-                            },
-                            child: const Text('Seleccionar'),
-                          )
-                        ]),
-
-                        const SizedBox(height: 16),
-
-                        // Acciones rápidas + total
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 8,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            ElevatedButton(
-                              onPressed: _lines.isEmpty &&
-                                      providerCtrl.text.isEmpty &&
-                                      invoiceCtrl.text.isEmpty &&
-                                      purchaseDate == null
-                                  ? null
-                                  : _clearAll,
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                              child: const Text('L  •  Limpiar'),
-                            ),
-                            ElevatedButton(
-                              onPressed: _lines.isEmpty ? null : _print,
-                              style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                              child: const Text('I  •  Imprimir PDF'),
-                            ),
-                            const SizedBox(width: 12),
-                            Text('Total: \$${_total.toStringAsFixed(2)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                            ElevatedButton(
-                              onPressed: _loading ? null : _save,
-                              style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
-                              child: _loading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Registrar compra'),
-                            ),
-                          ],
+                      // Acciones sobre líneas
+                      Row(children: [
+                        ElevatedButton.icon(
+                          onPressed: _addEmptyLine,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Agregar línea'),
+                          style:
+                              ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton.icon(
+                          onPressed: () async {
+                            final newId = await _showNewProductModal();
+                            if (newId != null) {
+                              await _loadData();
+                              _showSnack('Producto creado y listo para seleccionar.');
+                            }
+                          },
+                          icon: const Icon(Icons.add_box_outlined),
+                          label: const Text('Nuevo producto'),
+                          style:
+                              ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
                         ),
                       ]),
-                    ),
+
+                      const SizedBox(height: 12),
+
+                      // Encabezado (solo en pantallas medianas/anchas)
+                      if (isWide)
+                        Container(
+                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+                          decoration:
+                              BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(6)),
+                          child: Row(children: const [
+                            Expanded(child: Text('Producto')),
+                            SizedBox(width: 80, child: Text('Cant.')),
+                            SizedBox(width: 140, child: Text('Compra')),
+                            SizedBox(width: 140, child: Text('Venta sug.')),
+                            SizedBox(width: 40, child: Text('')),
+                          ]),
+                        ),
+                      if (isWide) const SizedBox(height: 8),
+
+                      // Líneas
+                      ListView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        itemCount: _lines.length,
+                        itemBuilder: (context, idx) => _lineTile(_lines[idx], idx, isWide),
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Proveedor, factura, fecha
+                      Row(children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            value: _providers != null && _providers!.isNotEmpty ? _providers!.first.id : null,
+                            items: _providers
+                                ?.map((p) {
+                                  final d = p.data() as Map<String, dynamic>;
+                                  return DropdownMenuItem(value: p.id, child: Text(d['name'] ?? '—'));
+                                })
+                                .toList(),
+                            onChanged: (v) => providerCtrl.text = v ?? '',
+                            decoration: const InputDecoration(labelText: 'Proveedor'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        SizedBox(
+                          width: 220,
+                          child: TextFormField(
+                            controller: invoiceCtrl,
+                            decoration: const InputDecoration(labelText: 'N° factura / serie'),
+                          ),
+                        ),
+                      ]),
+                      const SizedBox(height: 8),
+                      Row(children: [
+                        Expanded(
+                          child: Text(
+                            purchaseDate == null
+                                ? 'Fecha de compra: —'
+                                : 'Compra: ${purchaseDate!.day.toString().padLeft(2, '0')}/${purchaseDate!.month.toString().padLeft(2, '0')}/${purchaseDate!.year}',
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () async {
+                            final now = DateTime.now();
+                            final d = await showDatePicker(
+                              context: context,
+                              initialDate: purchaseDate ?? now,
+                              firstDate: DateTime(now.year - 5),
+                              lastDate: DateTime(now.year + 1),
+                            );
+                            if (d != null) setState(() => purchaseDate = d);
+                          },
+                          child: const Text('Seleccionar'),
+                        )
+                      ]),
+
+                      const SizedBox(height: 16),
+
+                      // Acciones rápidas + total
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          ElevatedButton(
+                            onPressed: _lines.isEmpty &&
+                                    providerCtrl.text.isEmpty &&
+                                    invoiceCtrl.text.isEmpty &&
+                                    purchaseDate == null
+                                ? null
+                                : _clearAll,
+                            style:
+                                ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                            child: const Text('L  •  Limpiar'),
+                          ),
+                          ElevatedButton(
+                            onPressed: _lines.isEmpty ? null : _print,
+                            style:
+                                ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                            child: const Text('I  •  Imprimir PDF'),
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Total: \$${_total.toStringAsFixed(2)}',
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                          ElevatedButton(
+                            onPressed: _loading ? null : _save,
+                            style:
+                                ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
+                            child: _loading
+                                ? const SizedBox(
+                                    width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Text('Registrar compra'),
+                          ),
+                        ],
+                      ),
+                    ]),
                   ),
-          ),
+                ),
         ),
+      ),
+    );
+
+    if (hasMaterialAncestor && hasScaffoldAncestor) {
+      // Ya está dentro de un Scaffold (p.ej. Movements) → solo devolvemos el contenido
+      return content;
+    }
+
+    // Ruta independiente → envolvemos en Scaffold propio
+    return Material(
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Registrar compra (Ingreso)'), backgroundColor: kGreen2),
+        body: SafeArea(child: content),
       ),
     );
   }
 
   // ====== Tile de línea (responsivo + modo selector o nuevo) ======
   Widget _lineTile(IngresoLine ln, int idx, bool isWide) {
-    final nameForExisting = ln.productId != null ? (_prodMap[ln.productId]?['name'] ?? 'Producto') : 'Producto';
+    final nameForExisting =
+        ln.productId != null ? (_prodMap[ln.productId]?['name'] ?? 'Producto') : 'Producto';
     final titleText = ln.isNew ? 'Nuevo producto' : nameForExisting;
 
     final productSelector = DropdownButtonFormField<String>(
@@ -728,7 +965,8 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       children: [
         TextFormField(
           initialValue: ln.newName,
-          decoration: const InputDecoration(labelText: 'Nombre del nuevo producto *', border: InputBorder.none),
+          decoration:
+              const InputDecoration(labelText: 'Nombre del nuevo producto *', border: InputBorder.none),
           onChanged: (v) => ln.newName = v,
         ),
         const SizedBox(height: 6),
@@ -747,15 +985,16 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           Expanded(child: ln.isNew ? productNewFields : productSelector),
           const SizedBox(width: 8),
           Column(children: [
-            // Botón para alternar "Nuevo" (inline)
             TextButton.icon(
               onPressed: () async {
                 if (!ln.isNew) {
-                  // Abrir modal de nuevo producto pre-llenando nombre sugerido (si product selected)
-                  final suggested = ln.productId != null ? (_prodMap[ln.productId]?['name'] ?? '') : '';
-                  final newId = await _showNewProductModal(suggestedName: suggested);
+                  final suggested =
+                      ln.productId != null ? (_prodMap[ln.productId]?['name'] ?? '') : '';
+                  final newId = await _showNewProductModal(
+                    suggestedName: suggested,
+                    baseProduct: ln.productId != null ? _prodMap[ln.productId!] : null,
+                  );
                   if (newId != null) {
-                    // reload products and select new created in this line
                     await _loadData();
                     setState(() {
                       ln.productId = newId;
@@ -764,7 +1003,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                     _showSnack('Producto creado y seleccionado.');
                   }
                 } else {
-                  // Toggle to existing
                   setState(() {
                     ln.isNew = !ln.isNew;
                     if (ln.isNew) ln.productId = null;
@@ -774,12 +1012,15 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
               icon: Icon(ln.isNew ? Icons.undo : Icons.add_box_outlined),
               label: Text(ln.isNew ? 'Usar existente' : 'Nuevo'),
             ),
-            // También pequeña acción para convertir a nuevo y abrir modal
             if (!ln.isNew)
               TextButton.icon(
                 onPressed: () async {
-                  final suggested = ln.productId != null ? (_prodMap[ln.productId]?['name'] ?? '') : '';
-                  final newId = await _showNewProductModal(suggestedName: suggested);
+                  final suggested =
+                      ln.productId != null ? (_prodMap[ln.productId]?['name'] ?? '') : '';
+                  final newId = await _showNewProductModal(
+                    suggestedName: suggested,
+                    baseProduct: ln.productId != null ? _prodMap[ln.productId!] : null,
+                  );
                   if (newId != null) {
                     await _loadData();
                     setState(() {
@@ -871,17 +1112,26 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                   right,
                 ]),
                 const SizedBox(height: 8),
-                // Fechas y subtotal
                 Row(children: [
                   Expanded(
-                    child: Text(ln.manufactureDate == null ? 'Fab.: —' : 'Fab.: ${_fmtDate(ln.manufactureDate!)}'),
+                    child: Text(ln.manufactureDate == null
+                        ? 'Fab.: —'
+                        : 'Fab.: ${_fmtDate(ln.manufactureDate!)}'),
                   ),
                   const SizedBox(width: 12),
-                  Expanded(child: Text(ln.expiryDate == null ? 'Vence: —' : 'Vence: ${_fmtDate(ln.expiryDate!)}')),
-                  TextButton(onPressed: () => _pickDateForLine(idx, isManufacture: true), child: const Text('Fab.')),
-                  TextButton(onPressed: () => _pickDateForLine(idx, isManufacture: false), child: const Text('Vence')),
+                  Expanded(
+                    child:
+                        Text(ln.expiryDate == null ? 'Vence: —' : 'Vence: ${_fmtDate(ln.expiryDate!)}'),
+                  ),
+                  TextButton(
+                      onPressed: () => _pickDateForLine(idx, isManufacture: true),
+                      child: const Text('Fab.')),
+                  TextButton(
+                      onPressed: () => _pickDateForLine(idx, isManufacture: false),
+                      child: const Text('Vence')),
                   const SizedBox(width: 12),
-                  Text('Subtotal: \$${ln.subtotal.toStringAsFixed(2)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text('Subtotal: \$${ln.subtotal.toStringAsFixed(2)}',
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
                 ]),
               ])
             : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -892,15 +1142,28 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                 right,
                 const SizedBox(height: 6),
                 Row(children: [
-                  Expanded(child: Text('Subtotal: \$${ln.subtotal.toStringAsFixed(2)}', textAlign: TextAlign.right)),
+                  Expanded(
+                      child: Text('Subtotal: \$${ln.subtotal.toStringAsFixed(2)}',
+                          textAlign: TextAlign.right)),
                 ]),
                 const SizedBox(height: 4),
                 Row(children: [
-                  Expanded(child: Text(ln.manufactureDate == null ? 'Fab.: —' : 'Fab.: ${_fmtDate(ln.manufactureDate!)}')),
-                  TextButton(onPressed: () => _pickDateForLine(idx, isManufacture: true), child: const Text('Seleccionar')),
+                  Expanded(
+                    child: Text(ln.manufactureDate == null
+                        ? 'Fab.: —'
+                        : 'Fab.: ${_fmtDate(ln.manufactureDate!)}'),
+                  ),
+                  TextButton(
+                      onPressed: () => _pickDateForLine(idx, isManufacture: true),
+                      child: const Text('Seleccionar')),
                   const SizedBox(width: 8),
-                  Expanded(child: Text(ln.expiryDate == null ? 'Vence: —' : 'Vence: ${_fmtDate(ln.expiryDate!)}')),
-                  TextButton(onPressed: () => _pickDateForLine(idx, isManufacture: false), child: const Text('Seleccionar')),
+                  Expanded(
+                    child:
+                        Text(ln.expiryDate == null ? 'Vence: —' : 'Vence: ${_fmtDate(ln.expiryDate!)}'),
+                  ),
+                  TextButton(
+                      onPressed: () => _pickDateForLine(idx, isManufacture: false),
+                      child: const Text('Seleccionar')),
                 ]),
               ]),
       ),
@@ -925,15 +1188,21 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     });
   }
 
-  // ====== Detalles (reusa esquema similar a egresos) ======
+  // ====== Detalles (con botón "nuevo producto similar") ======
   Future<void> _showDetailsDialog(Map<String, dynamic> d) async {
     if (d.isEmpty) return;
     final name = (d['name'] ?? 'Producto').toString();
     final price = _toDouble(d['price']);
+    final purchase = _toDouble(d['purchasePrice']);
     final stock = _toInt(d['stock']);
     final taxable = (d['taxable'] ?? false) == true;
     final iva = _toDouble(d['ivaPercent'] ?? 13);
     final expiry = (d['expiryDate'] as Timestamp?)?.toDate();
+    final form = (d['pharmForm'] ?? '').toString();
+    final route = (d['route'] ?? '').toString();
+    final strength = (d['strength'] ?? '').toString();
+    final pres = (d['presentation'] ?? '').toString();
+    final requiresRx = (d['requiresPrescription'] ?? false) == true;
 
     await showDialog(
       context: context,
@@ -945,24 +1214,81 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           children: [
             _kv('SKU', (d['sku'] ?? '—').toString()),
             _kv('Stock', '$stock'),
+            _kv('Precio compra', '\$${purchase.toStringAsFixed(2)}'),
             _kv('Precio venta', '\$${price.toStringAsFixed(2)}'),
             _kv('IVA', taxable ? '${iva.toStringAsFixed(0)}%' : 'No grava'),
             if (expiry != null) _kv('Vencimiento', _fmtDate(expiry)),
-            if ((d['pharmForm'] ?? '').toString().isNotEmpty || (d['route'] ?? '').toString().isNotEmpty)
-              _kv('Forma/Vía', '${d['pharmForm'] ?? '—'} / ${d['route'] ?? '—'}'),
-            if ((d['strength'] ?? '').toString().isNotEmpty) _kv('Concentración', (d['strength'] ?? '—').toString()),
-            if ((d['presentation'] ?? '').toString().isNotEmpty) _kv('Presentación', (d['presentation'] ?? '—').toString()),
+            if (form.isNotEmpty || route.isNotEmpty)
+              _kv('Forma/Vía', '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
+            if (strength.isNotEmpty) _kv('Concentración', strength),
+            if (pres.isNotEmpty) _kv('Presentación', pres),
+            if (requiresRx)
+              Padding(
+                padding: const EdgeInsets.only(top: 8.0),
+                child: Row(
+                  children: const [
+                    Icon(Icons.warning_amber, color: Colors.red),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text('Producto bajo receta médica',
+                          style: TextStyle(color: Colors.red)),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cerrar'))],
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cerrar')),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.add),
+            label: const Text('Nuevo producto similar'),
+            onPressed: () async {
+              final newId = await _showNewProductModal(suggestedName: name, baseProduct: d);
+              if (newId != null) {
+                await _loadData();
+                Navigator.pop(c);
+                final basePurchase = _toDouble(d['purchasePrice']);
+                final baseMargin = _toDouble(d['marginPercent'] ?? 10);
+                final suggestedSale = basePurchase * (1 + baseMargin / 100);
+                setState(() {
+                  _lines.insert(
+                    0,
+                    IngresoLine(
+                      productId: newId,
+                      qty: 1,
+                      purchasePrice: basePurchase,
+                      salePrice: suggestedSale,
+                    ),
+                  );
+                });
+                _showSnack('Producto similar creado y agregado a la compra.');
+              }
+            },
+          ),
+        ],
       ),
     );
   }
 
   Widget _kv(String k, String v) => Padding(
         padding: const EdgeInsets.only(bottom: 6.0),
-        child: Row(children: [SizedBox(width: 140, child: Text(k, style: const TextStyle(fontWeight: FontWeight.w600))), Expanded(child: Text(v))]),
+        child: Row(children: [
+          SizedBox(width: 140, child: Text(k, style: const TextStyle(fontWeight: FontWeight.w600))),
+          Expanded(child: Text(v)),
+        ]),
       );
 
-  String _fmtDate(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  String _fmtDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  Widget _pill(String t) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border.all(color: Colors.green.shade300),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(t, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+      );
 }
