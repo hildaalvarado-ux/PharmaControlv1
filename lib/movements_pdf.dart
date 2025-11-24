@@ -1,251 +1,497 @@
+// lib/movements_pdf.dart
 import 'dart:typed_data';
-import 'package:pdf/widgets.dart' as pw;
+
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 class MovementsPdf {
+  // Paleta igual que la de invoice_pdf.dart
+  static final PdfColor _green = PdfColor.fromHex('#2E7D32');
+  static final PdfColor _greenLight = PdfColor.fromHex('#E8F5E9');
+  static final PdfColor _border = PdfColor.fromHex('#D6D6D6');
+  static final PdfColor _totalRed = PdfColor.fromHex('#C62828');
+
+  /// Construye el PDF de movimientos.
+  ///
+  /// - [title] normalmente "Reporte de movimientos".
+  /// - [filterLabel] "Todos", "Ingresos", "Egresos".
+  /// - [from], [to] rango de fechas (pueden ser null).
+  /// - [movements] es la lista de mapas que mandas desde `MovementsManager`.
+  /// - [logoAssetPath] opcional, por defecto intenta `assets/logo.png`.
   static Future<Uint8List> build({
     required String title,
     required String filterLabel,
+    required DateTime? from,
+    required DateTime? to,
     required List<Map<String, dynamic>> movements,
-    DateTime? from,
-    DateTime? to,
+    String? logoAssetPath,
   }) async {
-    final pdf = pw.Document();
+    final doc = pw.Document();
 
-    String _fmtDate(DateTime d) =>
-        '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+    // Cargar logo (si existe el asset)
+    final logoBytes = await _tryLoad(logoAssetPath ?? 'assets/logo.png');
+    final logo = logoBytes != null ? pw.MemoryImage(logoBytes) : null;
 
-    String _fmtDateTime(DateTime d) =>
-        '${_fmtDate(d)} ${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-
-    double _money(dynamic v) {
-      if (v is num) return v.toDouble();
-      return double.tryParse(v?.toString() ?? '') ?? 0.0;
-    }
-
-    int _toInt(dynamic v) {
-      if (v is int) return v;
-      if (v is num) return v.toInt();
-      return int.tryParse(v?.toString() ?? '') ?? 0;
-    }
-
-    pdf.addPage(
+    doc.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(24),
-        build: (context) {
-          return [
-            pw.Header(
-              level: 0,
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        margin: const pw.EdgeInsets.all(30),
+        build: (context) => [
+          // ===== ENCABEZADO / MEMBRETE =====
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
                   pw.Text(
                     title,
                     style: pw.TextStyle(
-                      fontSize: 18,
+                      fontSize: 22,
                       fontWeight: pw.FontWeight.bold,
+                      color: _green,
                     ),
                   ),
-                  pw.Text(
-                    'Filtro: $filterLabel',
-                    style: const pw.TextStyle(fontSize: 10),
-                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text('Generado: ${_fmtDateTime(DateTime.now())}'),
                 ],
               ),
-            ),
-            if (from != null || to != null)
-              pw.Padding(
-                padding: const pw.EdgeInsets.only(bottom: 8),
-                child: pw.Text(
-                  'Rango: '
-                  '${from != null ? _fmtDate(from) : '—'} - '
-                  '${to != null ? _fmtDate(to) : '—'}',
-                  style: const pw.TextStyle(fontSize: 10),
-                ),
-              ),
-            pw.SizedBox(height: 8),
-            ...movements.map((m) {
-              final ts = m['createdAt'];
-              DateTime? dt;
-              if (ts is DateTime) {
-                dt = ts;
-              } else if (ts is int) {
-                dt = DateTime.fromMillisecondsSinceEpoch(ts);
-              }
-
-              final type =
-                  (m['type'] ?? '').toString().toLowerCase();
-              final total = _money(m['totalAmount']);
-              final counterparty =
-                  (m['counterpartyName'] ?? '—').toString();
-              final itemsRaw = (m['items'] as List<dynamic>? ?? []);
-              final items = itemsRaw
-                  .map<Map<String, dynamic>>(
-                      (e) => Map<String, dynamic>.from(e as Map))
-                  .toList();
-
-              return pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
                 children: [
-                  pw.Container(
-                    padding: const pw.EdgeInsets.symmetric(
-                        vertical: 4, horizontal: 6),
-                    decoration: pw.BoxDecoration(
-                      color: PdfColors.grey300,
-                      borderRadius: pw.BorderRadius.circular(4),
-                    ),
-                    child: pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Text(
-                          '${type == 'ingreso' ? 'Ingreso' : 'Egreso'} '
-                          '• ${m['createdByName'] ?? '—'}',
-                          style: pw.TextStyle(
-                            fontWeight: pw.FontWeight.bold,
-                            fontSize: 11,
-                          ),
-                        ),
-                        pw.Text(
-                          dt == null
-                              ? '—'
-                              : _fmtDateTime(dt),
-                          style: const pw.TextStyle(fontSize: 9),
-                        ),
-                      ],
-                    ),
-                  ),
-                  pw.SizedBox(height: 2),
-                  pw.Text(
-                    'Contraparte: $counterparty   |   '
-                    'Líneas: ${m['totalItems'] ?? items.length}   |   '
-                    'Total: ${total.toStringAsFixed(2)}',
-                    style: const pw.TextStyle(fontSize: 9),
-                  ),
-                  if ((m['note'] ?? '').toString().isNotEmpty)
-                    pw.Text(
-                      'Nota: ${m['note']}',
-                      style: const pw.TextStyle(fontSize: 9),
-                    ),
-                  pw.SizedBox(height: 4),
-                  pw.Table(
-                    border: pw.TableBorder.all(width: 0.2),
-                    columnWidths: {
-                      0: const pw.FlexColumnWidth(3),
-                      1: const pw.FlexColumnWidth(1),
-                      2: const pw.FlexColumnWidth(1),
-                      3: const pw.FlexColumnWidth(1),
-                      4: const pw.FlexColumnWidth(2),
-                    },
-                    children: [
-                      pw.TableRow(
-                        decoration:
-                            const pw.BoxDecoration(color: PdfColors.grey200),
-                        children: [
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Text('Producto',
-                                style: pw.TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: pw.FontWeight.bold)),
-                          ),
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Text('Cant.',
-                                style: pw.TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: pw.FontWeight.bold)),
-                          ),
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Text('P. unidad',
-                                style: pw.TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: pw.FontWeight.bold)),
-                          ),
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Text('Subtotal',
-                                style: pw.TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: pw.FontWeight.bold)),
-                          ),
-                          pw.Padding(
-                            padding: const pw.EdgeInsets.all(2),
-                            child: pw.Text('Stock',
-                                style: pw.TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: pw.FontWeight.bold)),
-                          ),
-                        ],
-                      ),
-                      ...items.map((it) {
-                        final qty = _toInt(it['qty']);
-                        final unitPrice = _money(
-                          it['unitPrice'] ??
-                              it['purchasePrice'] ??
-                              it['salePrice'],
-                        );
-                        final subtotal = _money(it['subtotal']);
-                        final sb = it['stockBefore'];
-                        final sa = it['stockAfter'];
-                        String stockText = '';
-                        if (sb is num && sa is num) {
-                          stockText =
-                              '${_toInt(sb)} → ${_toInt(sa)}';
-                        }
+                  pw.Text('Filtro: $filterLabel'),
+                  if (from != null || to != null)
+                    pw.Text(_dateRangeLabel(from, to)),
+                ],
+              ),
+            ],
+          ),
 
-                        return pw.TableRow(
-                          children: [
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.all(2),
-                              child: pw.Text(
-                                '${it['productName']} (SKU: ${it['sku']})',
-                                style: const pw.TextStyle(fontSize: 8),
-                              ),
-                            ),
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.all(2),
-                              child: pw.Text(
-                                qty.toString(),
-                                style: const pw.TextStyle(fontSize: 8),
-                              ),
-                            ),
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.all(2),
-                              child: pw.Text(
-                                unitPrice.toStringAsFixed(2),
-                                style: const pw.TextStyle(fontSize: 8),
-                              ),
-                            ),
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.all(2),
-                              child: pw.Text(
-                                subtotal.toStringAsFixed(2),
-                                style: const pw.TextStyle(fontSize: 8),
-                              ),
-                            ),
-                            pw.Padding(
-                              padding: const pw.EdgeInsets.all(2),
-                              child: pw.Text(
-                                stockText,
-                                style: const pw.TextStyle(fontSize: 8),
-                              ),
-                            ),
-                          ],
-                        );
-                      }),
+          pw.SizedBox(height: 12),
+
+          // Bloque tipo membrete de factura
+          pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              color: _greenLight,
+              borderRadius: pw.BorderRadius.circular(8),
+            ),
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                if (logo != null)
+                  pw.Container(
+                    width: 42,
+                    height: 42,
+                    margin: const pw.EdgeInsets.only(right: 10),
+                    child: pw.Image(logo, fit: pw.BoxFit.contain),
+                  ),
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        'PharmaControl',
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          color: _green,
+                          fontSize: 14,
+                        ),
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Text(
+                        'Reporte detallado de ingresos y egresos de inventario.',
+                      ),
+                      if (from == null && to == null) ...[
+                        pw.SizedBox(height: 2),
+                        pw.Text('Período: todos los movimientos'),
+                      ] else ...[
+                        pw.SizedBox(height: 2),
+                        pw.Text('Período: ${_dateRangeLabel(from, to)}'),
+                      ],
                     ],
                   ),
-                  pw.SizedBox(height: 10),
-                ],
-              );
-            }).toList(),
-          ];
-        },
+                ),
+              ],
+            ),
+          ),
+
+          pw.SizedBox(height: 16),
+
+          // ===== LISTA DE MOVIMIENTOS =====
+          ..._buildMovements(movements),
+
+          pw.SizedBox(height: 22),
+
+          // ===== PIE DE PÁGINA ESTILO FACTURA =====
+          pw.Divider(color: _border),
+          pw.SizedBox(height: 8),
+          pw.Center(
+            child: pw.Column(
+              children: [
+                pw.Text(
+                  'PharmaControl',
+                  style: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    color: _green,
+                  ),
+                ),
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  'Calle Principal #123, Sensuntepeque, Cabañas, El Salvador',
+                ),
+                pw.Text(
+                  'Soporte: soporte@pharmacontrol.com  •  +503 7000-0000  /  +503 7111-1111',
+                ),
+                pw.SizedBox(height: 6),
+                pw.Text('© ${DateTime.now().year} Todos los derechos reservados.'),
+              ],
+            ),
+          ),
+        ],
       ),
     );
 
-    return pdf.save();
+    return doc.save();
+  }
+
+  // ========= CONSTRUCCIÓN DE BLOQUES =========
+
+  static List<pw.Widget> _buildMovements(
+    List<Map<String, dynamic>> movements,
+  ) {
+    final widgets = <pw.Widget>[];
+
+    for (var idx = 0; idx < movements.length; idx++) {
+      final m = movements[idx];
+
+      final type = (m['type'] ?? '').toString().toLowerCase();
+      final tipoLabel = type == 'ingreso' ? 'Ingreso' : 'Egreso';
+
+      final createdBy = (m['createdByName'] ?? '—').toString();
+      final createdByEmail = (m['createdByEmail'] ?? '').toString();
+      final counterparty = (m['counterpartyName'] ?? '').toString();
+      final note = (m['note'] ?? '').toString();
+      final totalAmount = _toMoney(m['totalAmount']);
+      final totalItems = (m['totalItems'] ?? 0).toString();
+
+      DateTime? dt;
+      final createdAt = m['createdAt'];
+      if (createdAt is DateTime) {
+        dt = createdAt;
+      }
+
+      // items
+      final rawItems = (m['items'] as List<dynamic>? ?? []);
+      final items = rawItems
+          .map<Map<String, dynamic>>(
+              (e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+
+      widgets.add(
+        pw.Container(
+          margin: const pw.EdgeInsets.only(bottom: 12),
+          padding: const pw.EdgeInsets.all(10),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: _border),
+            borderRadius: pw.BorderRadius.circular(10),
+          ),
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              // Encabezado del movimiento (sin iconitos raros)
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      // Usuario + etiqueta de tipo en la misma línea
+                      pw.Row(
+                        mainAxisSize: pw.MainAxisSize.min,
+                        children: [
+                          pw.Text(
+                            createdBy,
+                            style: pw.TextStyle(
+                              fontWeight: pw.FontWeight.bold,
+                              color: _green,
+                            ),
+                          ),
+                          pw.SizedBox(width: 8),
+                          pw.Container(
+                            padding: const pw.EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: pw.BoxDecoration(
+                              color: _greenLight,
+                              borderRadius: pw.BorderRadius.circular(6),
+                            ),
+                            child: pw.Text(
+                              tipoLabel,
+                              style: pw.TextStyle(
+                                color: _green,
+                                fontWeight: pw.FontWeight.bold,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (createdByEmail.isNotEmpty)
+                        pw.Text(
+                          createdByEmail,
+                          style: const pw.TextStyle(fontSize: 9),
+                        ),
+                      if (dt != null)
+                        pw.Text(
+                          _fmtDateTime(dt),
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      if (counterparty.isNotEmpty) ...[
+                        pw.SizedBox(height: 3), // espacio extra antes de "Cliente"
+                        pw.Text(
+                          type == 'egreso'
+                              ? 'Cliente: $counterparty'
+                              : 'Proveedor: $counterparty',
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                      ],
+                      if (note.isNotEmpty)
+                        pw.Text(
+                          'Nota: $note',
+                          style: const pw.TextStyle(fontSize: 10),
+                        ),
+                    ],
+                  ),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        'Líneas: $totalItems',
+                        style: const pw.TextStyle(fontSize: 10),
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Text(
+                        'Total: ${_fmtMoney(totalAmount)}',
+                        style: pw.TextStyle(
+                          fontWeight: pw.FontWeight.bold,
+                          color: _totalRed,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+
+              pw.SizedBox(height: 8),
+
+              // Tabla de líneas con diseño similar a la factura
+              _itemsTable(items),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (widgets.isEmpty) {
+      widgets.add(
+        pw.Center(
+          child: pw.Text('No hay movimientos para mostrar.'),
+        ),
+      );
+    }
+
+    return widgets;
+  }
+
+  /// Tabla de líneas para cada movimiento:
+  /// Producto | Cant. | P. unidad | Subtotal | Stock
+  static pw.Widget _itemsTable(List<Map<String, dynamic>> items) {
+    if (items.isEmpty) {
+      return pw.Text(
+        'Sin líneas de detalle.',
+        style: const pw.TextStyle(fontSize: 10),
+      );
+    }
+
+    final headerStyle = pw.TextStyle(
+      fontWeight: pw.FontWeight.bold,
+      color: PdfColors.white,
+      fontSize: 10,
+    );
+
+    final rows = <pw.Widget>[];
+
+    // Cabecera
+    rows.add(
+      pw.Container(
+        decoration: pw.BoxDecoration(
+          color: _green,
+          borderRadius: pw.BorderRadius.circular(6),
+        ),
+        child: pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+          child: pw.Row(
+            children: [
+              _cellHeader('Producto', flex: 30, style: headerStyle),
+              _cellHeader('Cant.', flex: 8, style: headerStyle, align: pw.TextAlign.center),
+              _cellHeader('P. unidad', flex: 13, style: headerStyle, align: pw.TextAlign.right),
+              _cellHeader('Subtotal', flex: 13, style: headerStyle, align: pw.TextAlign.right),
+              _cellHeader('Stock', flex: 16, style: headerStyle, align: pw.TextAlign.right),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    // Filas
+    for (var i = 0; i < items.length; i++) {
+      final it = items[i];
+      final zebra = i % 2 == 1 ? PdfColor.fromHex('#FAFAFA') : PdfColors.white;
+
+      final qty = _toInt(it['qty']);
+      final unitPrice = _toMoney(
+        it['unitPrice'] ?? it['purchasePrice'] ?? it['salePrice'],
+      );
+      final subtotal = _toMoney(it['subtotal']);
+
+      final stockBefore = it['stockBefore'];
+      final stockAfter = it['stockAfter'];
+      String stockText = '';
+      if (stockBefore is num && stockAfter is num) {
+        // sin flecha, texto claro
+        stockText =
+            'Antes: ${_toInt(stockBefore)} / Después: ${_toInt(stockAfter)}';
+      }
+
+      rows.add(
+        pw.Container(
+          decoration: pw.BoxDecoration(
+            color: zebra,
+            border: pw.Border.all(color: _border),
+            borderRadius: i == items.length - 1
+                ? pw.BorderRadius.only(
+                    bottomLeft: const pw.Radius.circular(6),
+                    bottomRight: const pw.Radius.circular(6),
+                  )
+                : null,
+          ),
+          child: pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+            child: pw.Row(
+              children: [
+                _cell(
+                  '${it['productName']} (SKU: ${it['sku']})',
+                  flex: 30,
+                ),
+                _cell('$qty', flex: 8, align: pw.TextAlign.center),
+                _cell(
+                  _fmtMoney(unitPrice),
+                  flex: 13,
+                  align: pw.TextAlign.right,
+                ),
+                _cell(
+                  _fmtMoney(subtotal),
+                  flex: 13,
+                  align: pw.TextAlign.right,
+                ),
+                _cell(
+                  stockText,
+                  flex: 16,
+                  align: pw.TextAlign.right,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return pw.Column(children: rows);
+  }
+
+  // ========= Helpers de celdas =========
+
+  static pw.Widget _cellHeader(
+    String t, {
+    required int flex,
+    required pw.TextStyle style,
+    pw.TextAlign? align,
+  }) {
+    return pw.Expanded(
+      flex: flex,
+      child: pw.Text(
+        t,
+        style: style,
+        textAlign: align,
+      ),
+    );
+  }
+
+  static pw.Widget _cell(
+    String t, {
+    required int flex,
+    pw.TextAlign? align,
+  }) {
+    return pw.Expanded(
+      flex: flex,
+      child: pw.Text(
+        t,
+        textAlign: align,
+        softWrap: true,
+        style: const pw.TextStyle(fontSize: 10),
+      ),
+    );
+  }
+
+  // ========= Utils numéricos / formato =========
+
+  static int _toInt(dynamic v) {
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    if (v is num) return v.toInt();
+    return int.tryParse(v?.toString() ?? '') ?? 0;
+  }
+
+  static double _toMoney(dynamic v) {
+    if (v is num) return v.toDouble();
+    return double.tryParse((v?.toString() ?? '').replaceAll(',', '.')) ?? 0.0;
+  }
+
+  static String _fmtMoney(double v) => '\$${v.toStringAsFixed(2)}';
+
+  static String _fmtDate(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  static String _fmtDateTime(DateTime d) =>
+      '${_fmtDate(d)} '
+      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+
+  static String _dateRangeLabel(DateTime? from, DateTime? to) {
+    if (from == null && to == null) return 'Todos los movimientos';
+    if (from != null && to != null) {
+      return '${_fmtDate(from)} - ${_fmtDate(to)}';
+    }
+    if (from != null) {
+      return 'Desde ${_fmtDate(from)}';
+    }
+    // solo to != null
+    return 'Hasta ${_fmtDate(to!)}';
+  }
+
+  // ========= Carga segura de assets =========
+
+  static Future<Uint8List?> _tryLoad(String assetPath) async {
+    try {
+      final bytes = await rootBundle.load(assetPath);
+      return bytes.buffer.asUint8List();
+    } catch (_) {
+      return null;
+    }
   }
 }
