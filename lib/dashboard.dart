@@ -231,10 +231,11 @@ class _DashboardPageState extends State<DashboardPage> {
       case 7:
         return const SobreNosotrosPage();
       case 8:
-        return const PreguntasFrecuentesPage();
+        case 8:
+        return PreguntasFrecuentesPage(role: _roleNorm());
       default:
         return _pageOfertas();
-    }
+  }
   }
 
   // ---- AppBar title: SOLO texto
