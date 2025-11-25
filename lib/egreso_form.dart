@@ -24,7 +24,8 @@ class SaleLine {
   double ivaPercent;
   int stock;
   int qty;
-  double unitPrice; // unit price INCLUYE IVA
+  double unitPriceWithoutVat;
+  double unitPriceWithVat; // unit price INCLUYE IVA
   double discountPercent; // porcentaje de descuento aplicado
 
   SaleLine({
@@ -34,11 +35,12 @@ class SaleLine {
     required this.ivaPercent,
     required this.stock,
     this.qty = 1,
-    required this.unitPrice,
+    required this.unitPriceWithoutVat,
+    required this.unitPriceWithVat,
     this.discountPercent = 0.0,
   });
 
-  double get subtotal => unitPrice * qty;
+  double get subtotal => unitPriceWithVat * qty;
 }
 
 class _EgresoFormWidgetState extends State<EgresoFormWidget> {
@@ -103,12 +105,17 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       final discountPct = await _bestDiscountFor(pid, pdata);
 
       // Calculamos precio de venta (partiendo de precio SIN IVA) + aplicamos descuento y luego IVA
-      final finalPrice = _computeSaleUnitPrice(pdata, discountPct);
+      final priceWithoutVat = _computeSaleUnitPrice(pdata, discountPct);
+      final ivaPercent = _toDouble(pdata['ivaPercent'] ?? 13);
+      final taxable = (pdata['taxable'] ?? false) == true;
+      final priceWithVat =
+          taxable ? priceWithoutVat * (1 + ivaPercent / 100) : priceWithoutVat;
 
       _addLine(
         productId: pid,
         name: pdata['name'] ?? 'Producto',
-        unitPrice: finalPrice, // ya incluye IVA
+        unitPriceWithoutVat: priceWithoutVat,
+        unitPriceWithVat: priceWithVat,
         stock: _toInt(pdata['stock']),
         taxable: (pdata['taxable'] ?? false) == true,
         ivaPercent: _toDouble(pdata['ivaPercent'] ?? 13),
@@ -169,14 +176,14 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     return 0.0;
   }
 
-  // ========= LÓGICA PRECIO DE VENTA + IVA (AJUSTADA) =========
+  // ========= LÓGICA PRECIO DE VENTA (SIN IVA) =========
   //
   // Reglas (inventario almacenado SIN IVA):
   // - 'salePriceNet' o 'salePrice'  -> precio de venta NETO (sin IVA).
   // - Si no existen, 'price' se toma como precio de venta NETO (sin IVA).
   // - Si hay marginPercent/profitMargin/markup, se aplica sobre ese base.
-  // - Luego se aplica descuento y, al final, el IVA (si el producto grava).
-  // - El valor retornado SIEMPRE será precio FINAL con IVA (para cobrar al cliente).
+  // - Luego se aplica descuento.
+  // - El valor retornado es el precio NETO (sin IVA). El IVA se calcula aparte.
   double _computeSaleUnitPrice(Map<String, dynamic> pdata, double discountPct) {
     // 1) Determinar base neta (sin IVA)
     double baseNet;
@@ -204,14 +211,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       baseNet = baseNet * (1 - discountPct / 100);
     }
 
-    // 3) Agregar IVA si el producto grava
-    final iva = _toDouble(pdata['ivaPercent'] ?? 13);
-    final taxable = (pdata['taxable'] ?? false) == true;
-    if (taxable) {
-      baseNet = baseNet * (1 + iva / 100);
-    }
-
-    // Resultado: precio FINAL con IVA
+    // Resultado: precio NETO sin IVA
     return baseNet;
   }
 
@@ -266,7 +266,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   void _addLine({
     required String productId,
     required String name,
-    required double unitPrice,
+    required double unitPriceWithoutVat,
+    required double unitPriceWithVat,
     required int stock,
     required bool taxable,
     required double ivaPercent,
@@ -284,7 +285,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       SaleLine(
         productId: productId,
         name: name,
-        unitPrice: unitPrice, // YA incluye IVA
+        unitPriceWithoutVat: unitPriceWithoutVat,
+        unitPriceWithVat: unitPriceWithVat,
         stock: stock,
         taxable: taxable,
         ivaPercent: ivaPercent,
@@ -312,20 +314,16 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   double get _total => _lines.fold(0.0, (s, l) => s + l.subtotal);
 
   // _ivaTotal asume que l.unitPrice incluye IVA (por eso despejamos la porción IVA)
-  double get _ivaTotal {
-    double t = 0;
-    for (final l in _lines) {
-      if (l.taxable) {
-        final divider = 1 + (l.ivaPercent / 100);
-        final netUnit = l.unitPrice / divider;
-        final ivaUnit = l.unitPrice - netUnit;
-        t += ivaUnit * l.qty;
-      }
-    }
-    return t;
-  }
+  double get _ivaTotal => _lines.fold(
+      0.0,
+      (s, l) =>
+          s +
+          (l.taxable
+              ? (l.unitPriceWithVat - l.unitPriceWithoutVat) * l.qty
+              : 0.0));
 
-  double get _subtotalSinIVA => _total - _ivaTotal;
+  double get _subtotalSinIVA =>
+      _lines.fold(0.0, (s, l) => s + l.unitPriceWithoutVat * l.qty);
 
   // Por ahora consideramos que el IVA retenido es igual al IVA generado.
   // Si más adelante la retención es un porcentaje diferente, aquí se ajusta.
@@ -428,7 +426,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
             'productId': l.productId,
             'productName': l.name,
             'qty': l.qty,
-            'unitPrice': l.unitPrice, // incluye IVA
+            'unitPriceWithoutVat': l.unitPriceWithoutVat,
+            'unitPriceWithVat': l.unitPriceWithVat, // incluye IVA
             'subtotal': l.subtotal,
             'taxable': l.taxable,
             'ivaPercent': l.ivaPercent,
@@ -670,13 +669,23 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                                     : () async {
                                         final disc =
                                             await _bestDiscountFor(pdoc.id, d);
-                                        // finalPrice = precio FINAL con IVA (13%) aplicado a partir del precio sin IVA
-                                        final finalPrice =
+
+                                        final priceWithoutVat =
                                             _computeSaleUnitPrice(d, disc);
+                                        final ivaPercent =
+                                            _toDouble(d['ivaPercent'] ?? 13);
+                                        final taxable =
+                                            (d['taxable'] ?? false) == true;
+                                        final priceWithVat = taxable
+                                            ? priceWithoutVat *
+                                                (1 + ivaPercent / 100)
+                                            : priceWithoutVat;
+
                                         _addLine(
                                           productId: pdoc.id,
                                           name: name,
-                                          unitPrice: finalPrice,
+                                          unitPriceWithoutVat: priceWithoutVat,
+                                          unitPriceWithVat: priceWithVat,
                                           stock: stock,
                                           taxable:
                                               (d['taxable'] ?? false) == true,
@@ -907,7 +916,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
             children: [
               Expanded(
                 child: Text(
-                  '${l.name}  (Stock: ${l.stock}, ${_fmt(l.unitPrice)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''})',
+                  '${l.name}  (Stock: ${l.stock}, ${_fmt(l.unitPriceWithVat)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''})',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -933,7 +942,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                 ),
               ),
               const SizedBox(width: 8),
-              SizedBox(width: 100, child: Text(_fmt(l.unitPrice))), // ya con IVA
+              SizedBox(width: 100, child: Text(_fmt(l.unitPriceWithVat))), // ya con IVA
               const SizedBox(width: 8),
               SizedBox(width: 120, child: Text(_fmt(l.subtotal))), // ya con IVA
               IconButton(
@@ -968,7 +977,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                 children: [
                   Expanded(
                       child: Text(
-                          'Stock: ${l.stock}  •  ${_fmt(l.unitPrice)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''}')),
+                          'Stock: ${l.stock}  •  ${_fmt(l.unitPriceWithVat)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''}')),
                   IconButton(
                     tooltip: 'Quitar',
                     onPressed: () =>
