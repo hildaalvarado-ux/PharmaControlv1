@@ -199,13 +199,25 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       stream: productsRef.doc(productId).collection('batches').orderBy('expiryDate').snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) return const ListTile(title: Text("Error al cargar lotes."));
-        if (!snapshot.hasData) return const Center(child: Padding(padding: EdgeInsets.all(8.0), child: Text("Cargando lotes...")));
-        if (snapshot.data!.docs.isEmpty) return const ListTile(title: Text("No hay lotes registrados."));
+        if (!snapshot.hasData) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(8.0),
+              child: Text("Cargando lotes..."),
+            ),
+          );
+        }
+        if (snapshot.data!.docs.isEmpty) {
+          return const ListTile(title: Text("No hay lotes registrados."));
+        }
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Text("Lotes", style: TextStyle(fontWeight: FontWeight.bold))),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text("Lotes", style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
             ...snapshot.data!.docs.map((doc) {
               final batchData = doc.data() as Map<String, dynamic>;
               final expiry = _parseExpiry(batchData['expiryDate']);
@@ -283,30 +295,41 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                             if (requiresRx) _chip('Bajo receta', color: Colors.redAccent),
                           ],
                         ),
-                        subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('Categoría: ${data['category'] ?? '—'}'),
-                          Text('Precio (venta): ${_fmt(data['price'])} • Stock: ${data['stock'] ?? 0}'),
-                          if ((data['pharmForm'] ?? '').toString().isNotEmpty || (data['route'] ?? '').toString().isNotEmpty)
-                            Text('Forma/Vía: ${(data['pharmForm'] ?? '—')} / ${(data['route'] ?? '—')}'),
-                          if ((data['strength'] ?? '').toString().isNotEmpty)
-                            Text('Concentración: ${data['strength']}'),
-                          if ((data['presentation'] ?? '').toString().isNotEmpty)
-                            Text('Presentación: ${data['presentation']}'),
-                          if ((data['description'] ?? '').toString().isNotEmpty)
-                            Text('Descripción: ${data['description']}'),
-                        ]),
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Categoría: ${data['category'] ?? '—'}'),
+                            Text('Precio (venta): ${_fmt(data['price'])} • Stock: ${data['stock'] ?? 0}'),
+                            if ((data['pharmForm'] ?? '').toString().isNotEmpty ||
+                                (data['route'] ?? '').toString().isNotEmpty)
+                              Text('Forma/Vía: ${(data['pharmForm'] ?? '—')} / ${(data['route'] ?? '—')}'),
+                            if ((data['strength'] ?? '').toString().isNotEmpty)
+                              Text('Concentración: ${data['strength']}'),
+                            if ((data['presentation'] ?? '').toString().isNotEmpty)
+                              Text('Presentación: ${data['presentation']}'),
+                            if ((data['description'] ?? '').toString().isNotEmpty)
+                              Text('Descripción: ${data['description']}'),
+                          ],
+                        ),
                         children: [
                           _buildBatchesList(d.id),
-                          // Adding edit/delete actions inside the expanded area
                           Row(
                             mainAxisAlignment: MainAxisAlignment.end,
                             children: [
-                              TextButton.icon(onPressed: () => _showEditProductDialog(d), icon: const Icon(Icons.edit), label: const Text("Editar")),
-                              TextButton.icon(onPressed: () => _tryDeleteProduct(d), icon: const Icon(Icons.delete), label: const Text("Eliminar")),
+                              TextButton.icon(
+                                onPressed: () => _showEditProductDialog(d),
+                                icon: const Icon(Icons.edit),
+                                label: const Text("Editar"),
+                              ),
+                              TextButton.icon(
+                                onPressed: () => _tryDeleteProduct(d),
+                                icon: const Icon(Icons.delete),
+                                label: const Text("Eliminar"),
+                              ),
                             ],
                           )
                         ],
-                        trailing: const Icon(Icons.keyboard_arrow_down), // Standard expansion icon
+                        trailing: const Icon(Icons.keyboard_arrow_down),
                       ),
                     );
                   },
@@ -337,48 +360,69 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                       final requiresRx = (data['requiresPrescription'] ?? false) == true;
                       final providerName = _providers[data['providerId']] ?? (data['providerId'] ?? '—');
 
-                      return DataRow(cells: [
-                        DataCell(Text(data['name'] ?? '—')),
-                        DataCell(Text(data['sku'] ?? '—')),
-                        DataCell(Text(data['category'] ?? '—')),
-                        DataCell(Text(_fmt(data['price']))),
-                        DataCell(Icon(taxable ? Icons.check_circle : Icons.cancel, color: taxable ? Colors.orange : Colors.grey)),
-                        DataCell(Icon(requiresRx ? Icons.medical_services : Icons.remove, color: requiresRx ? Colors.redAccent : Colors.grey)),
-                        DataCell(Text((data['stock'] ?? 0).toString())),
-                        DataCell(Text('${data['pharmForm'] ?? '—'} / ${data['route'] ?? '—'}')),
-                        DataCell(Text(data['strength']?.toString() ?? '—')),
-                        DataCell(Text(data['presentation']?.toString() ?? '—')),
-                        DataCell(IconButton(
-                          icon: const Icon(Icons.inventory_2_outlined),
-                          tooltip: 'Ver Lotes',
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (c) => AlertDialog(
-                                title: Text("Lotes para ${data['name'] ?? ''}"),
-                                content: SizedBox(
-                                  width: 400,
-                                  child: _buildBatchesList(d.id),
+                      return DataRow(
+                        cells: [
+                          DataCell(Text(data['name'] ?? '—')),
+                          DataCell(Text(data['sku'] ?? '—')),
+                          DataCell(Text(data['category'] ?? '—')),
+                          DataCell(Text(_fmt(data['price']))),
+                          DataCell(
+                            Icon(
+                              taxable ? Icons.check_circle : Icons.cancel,
+                              color: taxable ? Colors.orange : Colors.grey,
+                            ),
+                          ),
+                          DataCell(
+                            Icon(
+                              requiresRx ? Icons.medical_services : Icons.remove,
+                              color: requiresRx ? Colors.redAccent : Colors.grey,
+                            ),
+                          ),
+                          DataCell(Text((data['stock'] ?? 0).toString())),
+                          DataCell(Text('${data['pharmForm'] ?? '—'} / ${data['route'] ?? '—'}')),
+                          DataCell(Text(data['strength']?.toString() ?? '—')),
+                          DataCell(Text(data['presentation']?.toString() ?? '—')),
+                          DataCell(
+                            IconButton(
+                              icon: const Icon(Icons.inventory_2_outlined),
+                              tooltip: 'Ver Lotes',
+                              onPressed: () {
+                                showDialog(
+                                  context: context,
+                                  builder: (c) => AlertDialog(
+                                    title: Text("Lotes para ${data['name'] ?? ''}"),
+                                    content: SizedBox(
+                                      width: 400,
+                                      child: _buildBatchesList(d.id),
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(c),
+                                        child: const Text("Cerrar"),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                          DataCell(Text(providerName.toString())),
+                          DataCell(
+                            Row(
+                              children: [
+                                IconButton(
+                                  onPressed: () async => _showEditProductDialog(d),
+                                  icon: const Icon(Icons.edit, color: Colors.black54),
                                 ),
-                                actions: [
-                                  TextButton(onPressed: () => Navigator.pop(c), child: const Text("Cerrar")),
-                                ],
-                              ),
-                            );
-                          },
-                        )),
-                        DataCell(Text(providerName.toString())),
-                        DataCell(Row(children: [
-                          IconButton(
-                            onPressed: () async => _showEditProductDialog(d),
-                            icon: const Icon(Icons.edit, color: Colors.black54),
+                                IconButton(
+                                  onPressed: () async => _tryDeleteProduct(d),
+                                  icon: const Icon(Icons.delete, color: Colors.redAccent),
+                                ),
+                              ],
+                            ),
                           ),
-                          IconButton(
-                            onPressed: () async => _tryDeleteProduct(d),
-                            icon: const Icon(Icons.delete, color: Colors.redAccent),
-                          ),
-                        ])),
-                      ]);
+                        ],
+                      );
                     }).toList(),
                   ),
                 );
@@ -403,12 +447,18 @@ class _AdminProductManagerState extends State<AdminProductManager> {
           ),
         ),
 
-        if (_loadingAction) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
+        if (_loadingAction)
+          const Padding(
+            padding: EdgeInsets.only(top: 12),
+            child: LinearProgressIndicator(),
+          ),
       ],
     );
   }
 
-  String _ddmmyyyy(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  String _ddmmyyyy(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
   String _fmt(dynamic n) {
     final v = _toNum(n).toDouble();
     return '\$${v.toStringAsFixed(2)}';
@@ -522,8 +572,10 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     final presentationCtrl = TextEditingController(text: (initial['presentation'] ?? '').toString());
     final unitsPerPackCtrl = TextEditingController(text: _numOrEmpty(initial['unitsPerPack'] ?? 1));
 
-    String? category = (initial['category'] ?? '').toString().isNotEmpty ? initial['category'] : null;
-    String? providerId = (initial['providerId'] ?? '').toString().isNotEmpty ? initial['providerId'] : null;
+    String? category =
+        (initial['category'] ?? '').toString().isNotEmpty ? initial['category'] : null;
+    String? providerId =
+        (initial['providerId'] ?? '').toString().isNotEmpty ? initial['providerId'] : null;
     bool taxable = (initial['taxable'] ?? false) == true;
     bool priceIsPerUnit = (initial['priceIsPerUnit'] ?? true) == true;
     bool requiresRx = (initial['requiresPrescription'] ?? false) == true;
@@ -562,243 +614,347 @@ class _AdminProductManagerState extends State<AdminProductManager> {
         return StatefulBuilder(
           builder: (c, setLocal) {
             Widget labeled(Widget child) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6.0),
-              child: child,
-            );
+                  padding: const EdgeInsets.symmetric(vertical: 6.0),
+                  child: child,
+                );
 
-            // CONTENIDO: Wrap limpio (sin Autocomplete)
-            final content = Wrap(
+            // campos del formulario (anchos reducidos para evitar overflow)
+            final formFields = Wrap(
               spacing: 12,
               runSpacing: 4,
               children: [
                 SizedBox(
-                  width: 360,
-                  child: labeled(TextFormField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(labelText: 'Nombre *'),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
-                  )),
-                ),
-                SizedBox(
-                  width: 220,
-                  child: labeled(TextFormField(
-                    controller: skuCtrl,
-                    decoration: const InputDecoration(labelText: 'SKU *'),
-                    validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
-                  )),
-                ),
-                SizedBox(
-                  width: 320,
-                  child: labeled(Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: category,
-                          decoration: const InputDecoration(labelText: 'Categoría *'),
-                          items: _categories.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                          onChanged: (v) => setLocal(() => category = v),
-                          validator: (v) => (v == null || v.trim().isEmpty) ? 'Requerido' : null,
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Agregar categoría',
-                        onPressed: () async {
-                          try {
-                            final res = await _showAddCategoryDialog(c);
-                            if (!mounted) return;
-                            if (res != null) {
-                              setState(() {}); // refresca lista externa
-                              setLocal(() => category = res);
-                            }
-                          } catch (e) {
-                            _showSnack('No se pudo agregar la categoría: $e');
-                          }
-                        },
-                        icon: const Icon(Icons.add),
-                      ),
-                    ],
-                  )),
-                ),
-                SizedBox(
-                  width: 500,
-                  child: labeled(TextFormField(
-                    controller: descCtrl,
-                    decoration: const InputDecoration(labelText: 'Descripción'),
-                  )),
-                ),
-                SizedBox(
-                  width: 350,
-                  child: labeled(DropdownButtonFormField<String>(
-                    value: providerId,
-                    decoration: const InputDecoration(labelText: 'Proveedor'),
-                    items: _providers.entries
-                        .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value)))
-                        .toList(),
-                    onChanged: (v) => setLocal(() => providerId = v),
-                  )),
-                ),
-                SizedBox(
                   width: 260,
-                  child: labeled(TextFormField(
-                    controller: purchasePriceCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Precio de COMPRA (sin IVA) *'),
-                    validator: (v) => (_toNum(v) <= 0) ? 'Monto inválido' : null,
-                    onChanged: (_) {
-                      if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
-                    },
-                  )),
-                ),
-                SizedBox(
-                  width: 220,
-                  child: labeled(TextFormField(
-                    controller: marginCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Margen % (por defecto 10)'),
-                    onChanged: (_) {
-                      if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
-                    },
-                  )),
-                ),
-                SizedBox(
-                  width: 260,
-                  child: labeled(SwitchListTile(
-                    title: const Text('Producto grava IVA'),
-                    value: taxable,
-                    onChanged: (v) {
-                      setLocal(() => taxable = v);
-                      if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
-                      else setLocal(recalcFromPrice);
-                    },
-                  )),
-                ),
-                SizedBox(
-                  width: 220,
-                  child: labeled(TextFormField(
-                    controller: ivaCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'IVA % (13)'),
-                    onChanged: (_) {
-                      if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
-                      else setLocal(recalcFromPrice);
-                    },
-                  )),
-                ),
-                SizedBox(
-                  width: 360,
-                  child: labeled(SwitchListTile(
-                    title: const Text('Calcular precio automáticamente'),
-                    subtitle: const Text('Compra + margen (+ IVA si aplica)'),
-                    value: autoPrice,
-                    onChanged: (v) {
-                      setLocal(() => autoPrice = v);
-                      if (v) setLocal(recalcFromPurchaseAndMargin);
-                    },
-                  )),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: labeled(TextFormField(
-                    controller: saleNetCtrl,
-                    enabled: false,
-                    decoration: const InputDecoration(labelText: 'Precio de VENTA SIN IVA (calc.)'),
-                  )),
-                ),
-                SizedBox(
-                  width: 280,
-                  child: labeled(TextFormField(
-                    controller: priceCtrl,
-                    keyboardType: TextInputType.number,
-                    enabled: !autoPrice,
-                    decoration: InputDecoration(
-                      labelText: taxable ? 'Precio de VENTA (CON IVA)' : 'Precio de VENTA',
-                      helperText: autoPrice ? 'Calculado automáticamente' : 'Editable',
+                  child: labeled(
+                    TextFormField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Requerido' : null,
                     ),
-                    onChanged: (_) {
-                      if (!autoPrice) setLocal(recalcFromPrice);
-                    },
-                  )),
+                  ),
+                ),
+                SizedBox(
+                  width: 220,
+                  child: labeled(
+                    TextFormField(
+                      controller: skuCtrl,
+                      decoration: const InputDecoration(labelText: 'SKU *'),
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            value: category,
+                            decoration:
+                                const InputDecoration(labelText: 'Categoría *'),
+                            items: _categories
+                                .map((e) => DropdownMenuItem(
+                                      value: e,
+                                      child: Text(e),
+                                    ))
+                                .toList(),
+                            onChanged: (v) => setLocal(() => category = v),
+                            validator: (v) =>
+                                (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Agregar categoría',
+                          onPressed: () async {
+                            try {
+                              final res = await _showAddCategoryDialog(c);
+                              if (!mounted) return;
+                              if (res != null) {
+                                setState(() {});
+                                setLocal(() => category = res);
+                              }
+                            } catch (e) {
+                              _showSnack('No se pudo agregar la categoría: $e');
+                            }
+                          },
+                          icon: const Icon(Icons.add),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    TextFormField(
+                      controller: descCtrl,
+                      decoration:
+                          const InputDecoration(labelText: 'Descripción'),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    DropdownButtonFormField<String>(
+                      value: providerId,
+                      decoration:
+                          const InputDecoration(labelText: 'Proveedor'),
+                      items: _providers.entries
+                          .map(
+                            (e) => DropdownMenuItem(
+                              value: e.key,
+                              child: Text(e.value),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => setLocal(() => providerId = v),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    TextFormField(
+                      controller: purchasePriceCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                          labelText: 'Precio de COMPRA (sin IVA) *'),
+                      validator: (v) =>
+                          (_toNum(v) <= 0) ? 'Monto inválido' : null,
+                      onChanged: (_) {
+                        if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
+                      },
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 220,
+                  child: labeled(
+                    TextFormField(
+                      controller: marginCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                          labelText: 'Margen % (por defecto 10)'),
+                      onChanged: (_) {
+                        if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
+                      },
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    SwitchListTile(
+                      title: const Text('Producto grava IVA'),
+                      value: taxable,
+                      onChanged: (v) {
+                        setLocal(() => taxable = v);
+                        if (autoPrice) {
+                          setLocal(recalcFromPurchaseAndMargin);
+                        } else {
+                          setLocal(recalcFromPrice);
+                        }
+                      },
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 220,
+                  child: labeled(
+                    TextFormField(
+                      controller: ivaCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration:
+                          const InputDecoration(labelText: 'IVA % (13)'),
+                      onChanged: (_) {
+                        if (autoPrice) setLocal(recalcFromPurchaseAndMargin);
+                        else setLocal(recalcFromPrice);
+                      },
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    SwitchListTile(
+                      title: const Text('Calcular precio automáticamente'),
+                      subtitle:
+                          const Text('Compra + margen (+ IVA si aplica)'),
+                      value: autoPrice,
+                      onChanged: (v) {
+                        setLocal(() => autoPrice = v);
+                        if (v) setLocal(recalcFromPurchaseAndMargin);
+                      },
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    TextFormField(
+                      controller: saleNetCtrl,
+                      enabled: false,
+                      decoration: const InputDecoration(
+                          labelText: 'Precio de VENTA SIN IVA (calc.)'),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    TextFormField(
+                      controller: priceCtrl,
+                      keyboardType: TextInputType.number,
+                      enabled: !autoPrice,
+                      decoration: InputDecoration(
+                        labelText: taxable
+                            ? 'Precio de VENTA (CON IVA)'
+                            : 'Precio de VENTA',
+                        helperText: autoPrice
+                            ? 'Calculado automáticamente'
+                            : 'Editable',
+                      ),
+                      onChanged: (_) {
+                        if (!autoPrice) setLocal(recalcFromPrice);
+                      },
+                    ),
+                  ),
                 ),
                 SizedBox(
                   width: 200,
-                  child: labeled(TextFormField(
-                    controller: stockCtrl,
-                    enabled: false, // Stock is now calculated from batches
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Stock (Calculado)'),
-                  )),
+                  child: labeled(
+                    TextFormField(
+                      controller: stockCtrl,
+                      enabled: false,
+                      keyboardType: TextInputType.number,
+                      decoration:
+                          const InputDecoration(labelText: 'Stock (Calculado)'),
+                    ),
+                  ),
                 ),
                 SizedBox(
                   width: 260,
-                  child: labeled(SwitchListTile(
-                    title: const Text('Precio es por unidad'),
-                    value: priceIsPerUnit,
-                    onChanged: (v) => setLocal(() => priceIsPerUnit = v),
-                  )),
-                ),
-                SizedBox(
-                  width: 320,
-                  child: labeled(SwitchListTile(
-                    title: const Text('Producto bajo receta médica'),
-                    value: requiresRx,
-                    onChanged: (v) => setLocal(() => requiresRx = v),
-                  )),
-                ),
-                SizedBox(
-                  width: 300,
-                  child: labeled(DropdownButtonFormField<String>(
-                    value: pharmForm.isNotEmpty ? pharmForm : null,
-                    decoration: const InputDecoration(
-                      labelText: 'Forma farmacéutica',
-                      helperText: 'Ej: Tableta, Cápsula, Jarabe…',
+                  child: labeled(
+                    SwitchListTile(
+                      title: const Text('Precio es por unidad'),
+                      value: priceIsPerUnit,
+                      onChanged: (v) => setLocal(() => priceIsPerUnit = v),
                     ),
-                    items: const [
-                      'Tableta', 'Cápsula', 'Jarabe', 'Gotas', 'Suspensión', 'Ungüento', 'Crema', 'Solución inyectable', 'Aerosol', 'Parche'
-                    ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                    onChanged: (v) => setLocal(() => pharmForm = (v ?? '')),
-                  )),
+                  ),
                 ),
                 SizedBox(
-                  width: 300,
-                  child: labeled(DropdownButtonFormField<String>(
-                    value: route.isNotEmpty ? route : null,
-                    decoration: const InputDecoration(
-                      labelText: 'Vía de administración',
-                      helperText: 'Ej: Oral, Tópica, Oftálmica…',
+                  width: 260,
+                  child: labeled(
+                    SwitchListTile(
+                      title: const Text('Producto bajo receta médica'),
+                      value: requiresRx,
+                      onChanged: (v) => setLocal(() => requiresRx = v),
                     ),
-                    items: const [
-                      'Oral', 'Tópica', 'Oftálmica', 'Otica', 'Intravenosa', 'Intramuscular', 'Subcutánea', 'Rectal', 'Vaginal', 'Inhalatoria'
-                    ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                    onChanged: (v) => setLocal(() => route = (v ?? '')),
-                  )),
+                  ),
                 ),
                 SizedBox(
-                  width: 300,
-                  child: labeled(TextFormField(
-                    controller: strengthCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Concentración',
-                      helperText: 'Ej: 500 mg • 5 mg/5 mL',
+                  width: 260,
+                  child: labeled(
+                    DropdownButtonFormField<String>(
+                      value: pharmForm.isNotEmpty ? pharmForm : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Forma farmacéutica',
+                        helperText: 'Ej: Tableta, Cápsula, Jarabe…',
+                      ),
+                      items: const [
+                        'Tableta',
+                        'Cápsula',
+                        'Jarabe',
+                        'Gotas',
+                        'Suspensión',
+                        'Ungüento',
+                        'Crema',
+                        'Solución inyectable',
+                        'Aerosol',
+                        'Parche',
+                      ]
+                          .map(
+                            (e) => DropdownMenuItem(
+                              value: e,
+                              child: Text(e),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) =>
+                          setLocal(() => pharmForm = (v ?? '')),
                     ),
-                  )),
+                  ),
                 ),
                 SizedBox(
-                  width: 320,
-                  child: labeled(TextFormField(
-                    controller: presentationCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Presentación',
-                      helperText: 'Ej: Caja x10 • Frasco 120 mL',
+                  width: 260,
+                  child: labeled(
+                    DropdownButtonFormField<String>(
+                      value: route.isNotEmpty ? route : null,
+                      decoration: const InputDecoration(
+                        labelText: 'Vía de administración',
+                        helperText: 'Ej: Oral, Tópica, Oftálmica…',
+                      ),
+                      items: const [
+                        'Oral',
+                        'Tópica',
+                        'Oftálmica',
+                        'Otica',
+                        'Intravenosa',
+                        'Intramuscular',
+                        'Subcutánea',
+                        'Rectal',
+                        'Vaginal',
+                        'Inhalatoria',
+                      ]
+                          .map(
+                            (e) => DropdownMenuItem(
+                              value: e,
+                              child: Text(e),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) => setLocal(() => route = (v ?? '')),
                     ),
-                  )),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    TextFormField(
+                      controller: strengthCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Concentración',
+                        helperText: 'Ej: 500 mg • 5 mg/5 mL',
+                      ),
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 260,
+                  child: labeled(
+                    TextFormField(
+                      controller: presentationCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Presentación',
+                        helperText: 'Ej: Caja x10 • Frasco 120 mL',
+                      ),
+                    ),
+                  ),
                 ),
                 SizedBox(
                   width: 220,
-                  child: labeled(TextFormField(
-                    controller: unitsPerPackCtrl,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'Unidades por empaque'),
-                  )),
+                  child: labeled(
+                    TextFormField(
+                      controller: unitsPerPackCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                          labelText: 'Unidades por empaque'),
+                    ),
+                  ),
                 ),
               ],
             );
@@ -806,6 +962,59 @@ class _AdminProductManagerState extends State<AdminProductManager> {
             final screenH = MediaQuery.of(context).size.height;
             final maxH = screenH * 0.8;
             final targetH = screenH * 0.6;
+            final primaryLabel =
+                title.toLowerCase().contains('editar') ? 'Actualizar' : 'Agregar';
+
+            Future<void> handleSave() async {
+              if (!formKey.currentState!.validate()) return;
+
+              final payload = <String, dynamic>{
+                'name': nameCtrl.text.trim(),
+                'sku': skuCtrl.text.trim(),
+                'category': (category ?? '').trim(),
+                'description': descCtrl.text.trim(),
+                'purchasePrice': _toNum(purchasePriceCtrl.text),
+                'marginPercent':
+                    _toNum(marginCtrl.text.isEmpty ? '10' : marginCtrl.text),
+                'taxable': taxable,
+                'ivaPercent': _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text),
+                'salePriceNet': _toNum(saleNetCtrl.text),
+                'price': _toNum(priceCtrl.text),
+                'priceIsPerUnit': priceIsPerUnit,
+                'stock': _toNum(stockCtrl.text),
+                'providerId': providerId,
+                'requiresPrescription': requiresRx,
+                'pharmForm': pharmForm.trim(),
+                'route': route.trim(),
+                'strength': strengthCtrl.text.trim(),
+                'presentation': presentationCtrl.text.trim(),
+                'unitsPerPack': _toNum(
+                    unitsPerPackCtrl.text.isEmpty ? '1' : unitsPerPackCtrl.text),
+              };
+
+              if (autoPrice) {
+                final purchase = _toNum(purchasePriceCtrl.text).toDouble();
+                final margin =
+                    _toNum(marginCtrl.text.isEmpty ? '10' : marginCtrl.text)
+                        .toDouble();
+                final iva =
+                    _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text).toDouble();
+                final net = purchase * (1 + (margin / 100));
+                final gross = taxable ? net * (1 + (iva / 100)) : net;
+                payload['salePriceNet'] = net;
+                payload['price'] = gross;
+              } else {
+                final gross = _toNum(priceCtrl.text).toDouble();
+                final iva =
+                    _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text).toDouble();
+                final net = taxable ? (gross / (1 + (iva / 100))) : gross;
+                payload['salePriceNet'] = net;
+              }
+
+              Navigator.pop(c); // cerrar diálogo
+              await onSubmit(payload);
+            }
+
             return AlertDialog(
               title: Text(title),
               content: ConstrainedBox(
@@ -813,60 +1022,30 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                 child: SingleChildScrollView(
                   child: SizedBox(
                     height: targetH.clamp(420.0, 680.0),
-                    child: Form(key: formKey, child: content),
+                    child: Form(
+                      key: formKey,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          formFields,
+                          const SizedBox(height: 16),
+                          ElevatedButton.icon(
+                            icon: const Icon(Icons.save),
+                            label: Text(primaryLabel),
+                            onPressed: handleSave,
+                          ),
+                          const SizedBox(height: 8),
+                          OutlinedButton(
+                            onPressed: () => Navigator.pop(c),
+                            child: const Text('Cancelar'),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancelar')),
-                ElevatedButton.icon(
-                  icon: const Icon(Icons.save),
-                  label: const Text('Guardar'),
-                  onPressed: () async {
-                    if (!formKey.currentState!.validate()) return;
-
-                    final payload = <String, dynamic>{
-                      'name': nameCtrl.text.trim(),
-                      'sku': skuCtrl.text.trim(),
-                      'category': (category ?? '').trim(),
-                      'description': descCtrl.text.trim(),
-                      'purchasePrice': _toNum(purchasePriceCtrl.text),
-                      'marginPercent': _toNum(marginCtrl.text.isEmpty ? '10' : marginCtrl.text),
-                      'taxable': taxable,
-                      'ivaPercent': _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text),
-                      'salePriceNet': _toNum(saleNetCtrl.text),
-                      'price': _toNum(priceCtrl.text),
-                      'priceIsPerUnit': priceIsPerUnit,
-                      'stock': _toNum(stockCtrl.text),
-                      'providerId': providerId,
-                      'requiresPrescription': requiresRx,
-                      'pharmForm': pharmForm.trim(),
-                      'route': route.trim(),
-                      'strength': strengthCtrl.text.trim(),
-                      'presentation': presentationCtrl.text.trim(),
-                      'unitsPerPack': _toNum(unitsPerPackCtrl.text.isEmpty ? '1' : unitsPerPackCtrl.text),
-                    };
-
-                    if (autoPrice) {
-                      final purchase = _toNum(purchasePriceCtrl.text).toDouble();
-                      final margin = _toNum(marginCtrl.text.isEmpty ? '10' : marginCtrl.text).toDouble();
-                      final iva = _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text).toDouble();
-                      final net = purchase * (1 + (margin / 100));
-                      final gross = taxable ? net * (1 + (iva / 100)) : net;
-                      payload['salePriceNet'] = net;
-                      payload['price'] = gross;
-                    } else {
-                      final gross = _toNum(priceCtrl.text).toDouble();
-                      final iva = _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text).toDouble();
-                      final net = taxable ? (gross / (1 + (iva / 100))) : gross;
-                      payload['salePriceNet'] = net;
-                    }
-
-                    Navigator.pop(c); // cerrar diálogo
-                    await onSubmit(payload);
-                  },
-                ),
-              ],
             );
           },
         );
@@ -874,9 +1053,11 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     );
   }
 
-  // Diálogo “Nueva categoría” (usa el contexto del diálogo padre)
-  Future<String?> _showAddCategoryDialog(BuildContext dialogCtx, {String initial = ''}) async {
-    final TextEditingController newCatCtrl = TextEditingController(text: initial);
+  // Diálogo “Nueva categoría”
+  Future<String?> _showAddCategoryDialog(BuildContext dialogCtx,
+      {String initial = ''}) async {
+    final TextEditingController newCatCtrl =
+        TextEditingController(text: initial);
     final String? res = await showDialog<String>(
       context: dialogCtx,
       barrierDismissible: true,
@@ -889,7 +1070,10 @@ class _AdminProductManagerState extends State<AdminProductManager> {
           decoration: const InputDecoration(hintText: 'Ej. Analgésicos'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancelar')),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
           ElevatedButton(
             onPressed: () {
               final name = newCatCtrl.text.trim();
@@ -905,7 +1089,8 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       final name = res.trim();
       if (!_categories.contains(name)) {
         setState(() {
-          _categories = [..._categories, name]..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+          _categories = [..._categories, name]
+            ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
         });
       }
       return name;

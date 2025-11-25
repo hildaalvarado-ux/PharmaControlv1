@@ -370,43 +370,97 @@ class _HomeCarouselState extends State<HomeCarousel> {
     final size = MediaQuery.of(context).size;
     final isMobile = size.width < 700;
 
+    // Relación de aspecto tipo 16:9 para web
+    const double aspectRatio = 16 / 9;
+
+    double carouselHeight;
+    if (isMobile) {
+      // Móvil: se mantiene tu lógica, con límites suaves
+      carouselHeight =
+          (size.width * 0.55).clamp(150.0, 260.0).toDouble();
+    } else {
+      // Web: calculamos la altura según un ancho de contenido y la relación 16:9
+      final double contentWidth =
+          (size.width * 0.10).clamp(600.0, 1000.0).toDouble();
+      carouselHeight =
+          (contentWidth / aspectRatio).clamp(220.0, 350.0).toDouble();
+    }
+
     return Stack(
       children: [
         SingleChildScrollView(
           child: Column(
             children: [
               // Carrusel responsivo
-              SizedBox(
-                height: isMobile ? 180 : 260,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    PageView.builder(
-                      controller: _pageController,
-                      itemCount: _images.length,
-                      onPageChanged: (index) => setState(() => _currentIndex = index),
-                      itemBuilder: (context, index) {
-                        return ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.asset(_images[index], fit: BoxFit.cover, width: double.infinity),
-                        );
-                      },
-                    ),
-                    Positioned(
-                      left: 10,
-                      child: IconButton(
-                        icon: const Icon(Icons.arrow_back_ios, color: Colors.white),
-                        onPressed: _goToPrevious,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: SizedBox(
+                  height: carouselHeight,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: PageView.builder(
+                          controller: _pageController,
+                          itemCount: _images.length,
+                          onPageChanged: (index) => setState(() => _currentIndex = index),
+                          itemBuilder: (context, index) {
+                            return Image.asset(
+                              _images[index],
+                              width: double.infinity,
+                              fit: BoxFit.fitWidth, // imagen completa horizontalmente
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                    Positioned(
-                      right: 10,
-                      child: IconButton(
-                        icon: const Icon(Icons.arrow_forward_ios, color: Colors.white),
-                        onPressed: _goToNext,
+                      // Flecha izquierda
+                      Positioned(
+                        left: 8,
+                        child: _CarouselArrowButton(
+                          icon: Icons.arrow_back_ios_new_rounded,
+                          onTap: _goToPrevious,
+                        ),
                       ),
-                    ),
-                  ],
+                      // Flecha derecha
+                      Positioned(
+                        right: 8,
+                        child: _CarouselArrowButton(
+                          icon: Icons.arrow_forward_ios_rounded,
+                          onTap: _goToNext,
+                        ),
+                      ),
+                      // Indicadores inferiores
+                      Positioned(
+                        bottom: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.35),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(_images.length, (index) {
+                              final bool isActive = index == _currentIndex;
+                              return AnimatedContainer(
+                                duration: const Duration(milliseconds: 250),
+                                margin: const EdgeInsets.symmetric(horizontal: 3),
+                                width: isActive ? 14 : 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(10),
+                                  color: isActive
+                                      ? Colors.white
+                                      : Colors.white.withOpacity(0.5),
+                                ),
+                              );
+                            }),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
 
@@ -841,5 +895,36 @@ class _ResponsiveGrid extends StatelessWidget {
         itemBuilder: itemBuilder,
       );
     });
+  }
+}
+
+/// Botón redondo para las flechas del carrusel (se ve bien en móvil y escritorio).
+class _CarouselArrowButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+
+  const _CarouselArrowButton({
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.black.withOpacity(0.35),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(6.0),
+          child: Icon(
+            icon,
+            color: Colors.white,
+            size: 18,
+          ),
+        ),
+      ),
+    );
   }
 }

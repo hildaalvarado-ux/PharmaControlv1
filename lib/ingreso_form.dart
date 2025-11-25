@@ -7,15 +7,14 @@ import 'package:flutter/material.dart';
 import 'app_theme.dart';
 import 'invoice_pdf.dart';
 
-// ⬇️ Salida PDF multiplataforma: móvil/escritorio vs web
-import 'pdf_output_mobile.dart' if (dart.library.html) 'pdf_output_web.dart' as pdf_out;
+// Salida PDF multiplataforma (móvil/web)
+import 'pdf_output_mobile.dart'
+    if (dart.library.html) 'pdf_output_web.dart' as pdf_out;
 
 class IngresoLine {
-  // si es existente
   String? productId;
   String? category;
 
-  // si es nuevo
   bool isNew;
   String newName;
   String newSku;
@@ -79,8 +78,9 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       setState(() {
         _lines.add(
           IngresoLine(
-            productId:
-                _products != null && _products!.isNotEmpty ? _products!.first.id : null,
+            productId: _products != null && _products!.isNotEmpty
+                ? _products!.first.id
+                : null,
           ),
         );
       });
@@ -127,7 +127,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     }
   }
 
-  // --- helpers numéricos
   int _toInt(dynamic v) {
     if (v is int) return v;
     if (v is double) return v.toInt();
@@ -146,7 +145,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
 
   double get _total => _lines.fold(0.0, (s, l) => s + l.subtotal);
 
-  // UI helpers
   void _addEmptyLine() => setState(() => _lines.insert(0, IngresoLine()));
 
   void _removeLine(int idx) => setState(() => _lines.removeAt(idx));
@@ -160,14 +158,14 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       productFilterCtrl.clear();
       _lines.add(
         IngresoLine(
-          productId:
-              _products != null && _products!.isNotEmpty ? _products!.first.id : null,
+          productId: _products != null && _products!.isNotEmpty
+              ? _products!.first.id
+              : null,
         ),
       );
     });
   }
 
-  // Al elegir producto existente, precargar compra y venta sugerida
   void _onChooseProduct(int idx, String? pid) {
     setState(() {
       final ln = _lines[idx];
@@ -187,7 +185,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     });
   }
 
-  // Búsqueda superior
   List<QueryDocumentSnapshot> get _filteredProducts {
     if ((_products == null) || (_products!.isEmpty)) return [];
     final q = productFilterCtrl.text.trim().toLowerCase();
@@ -221,7 +218,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     productFilterCtrl.clear();
   }
 
-  // ==== Generar siguiente SKU simple
   Future<String> _generateNextSku() async {
     try {
       final q = await productsRef.orderBy('sku', descending: true).limit(1).get();
@@ -247,7 +243,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     }
   }
 
-  // ==== Modal: crear producto rápido
   Future<String?> _showNewProductModal({
     String? suggestedName,
     int? defaultStock,
@@ -343,8 +338,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                                       child: Text(e),
                                     ))
                                 .toList(),
-                            onChanged: (v) =>
-                                setLocal(() => category = v),
+                            onChanged: (v) => setLocal(() => category = v),
                             validator: (v) =>
                                 (v == null || v.trim().isEmpty)
                                     ? 'Requerido'
@@ -448,27 +442,22 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                                   TextButton(
                                     onPressed: () async {
                                       final now = DateTime.now();
-                                      final d =
-                                          await showDatePicker(
+                                      final d = await showDatePicker(
                                         context: context,
-                                        initialDate:
-                                            expiry ?? now,
-                                        firstDate:
-                                            DateTime(now.year - 5),
-                                        lastDate:
-                                            DateTime(now.year + 15),
+                                        initialDate: expiry ?? now,
+                                        firstDate: DateTime(now.year - 5),
+                                        lastDate: DateTime(now.year + 15),
                                       );
                                       if (d != null) {
                                         setLocal(() => expiry = d);
                                       }
                                     },
-                                    child:
-                                        const Text('Seleccionar'),
+                                    child: const Text('Seleccionar'),
                                   ),
                                   if (expiry != null)
                                     TextButton(
-                                      onPressed: () => setLocal(
-                                          () => expiry = null),
+                                      onPressed: () =>
+                                          setLocal(() => expiry = null),
                                       child: const Text('Borrar'),
                                     ),
                                 ],
@@ -478,8 +467,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                         ),
                         labeled(
                           TextFormField(
-                            controller:
-                                TextEditingController(text: strength),
+                            controller: TextEditingController(text: strength),
                             decoration: const InputDecoration(
                                 labelText: 'Concentración (opcional)'),
                             onChanged: (v) => strength = v,
@@ -487,8 +475,8 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                         ),
                         labeled(
                           TextFormField(
-                            controller: TextEditingController(
-                                text: presentation),
+                            controller:
+                                TextEditingController(text: presentation),
                             decoration: const InputDecoration(
                                 labelText: 'Presentación (opcional)'),
                             onChanged: (v) => presentation = v,
@@ -496,9 +484,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                         ),
                         labeled(
                           DropdownButtonFormField<String>(
-                            value: pharmForm.isNotEmpty
-                                ? pharmForm
-                                : null,
+                            value: pharmForm.isNotEmpty ? pharmForm : null,
                             decoration:
                                 const InputDecoration(labelText: 'Forma'),
                             items: const [
@@ -526,8 +512,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                         ),
                         labeled(
                           DropdownButtonFormField<String>(
-                            value:
-                                route.isNotEmpty ? route : null,
+                            value: route.isNotEmpty ? route : null,
                             decoration:
                                 const InputDecoration(labelText: 'Vía'),
                             items: const [
@@ -557,16 +542,16 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                             children: [
                               Checkbox(
                                 value: taxable,
-                                onChanged: (v) => setLocal(
-                                    () => taxable = v ?? false),
+                                onChanged: (v) =>
+                                    setLocal(() => taxable = v ?? false),
                               ),
                               const SizedBox(width: 6),
                               const Text('Grava IVA'),
                               const SizedBox(width: 16),
                               Checkbox(
                                 value: requiresRx,
-                                onChanged: (v) => setLocal(() =>
-                                    requiresRx = v ?? false),
+                                onChanged: (v) =>
+                                    setLocal(() => requiresRx = v ?? false),
                               ),
                               const SizedBox(width: 6),
                               const Text('Bajo receta'),
@@ -596,14 +581,12 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                       'name': nameCtrl.text.trim(),
                       'sku': skuCtrl.text.trim(),
                       'category': category,
-                      'purchasePrice':
-                          double.tryParse(purchaseCtrl.text
-                                  .replaceAll(',', '.')) ??
-                              0.0,
-                      'marginPercent':
-                          double.tryParse(marginCtrl.text
-                                  .replaceAll(',', '.')) ??
-                              10,
+                      'purchasePrice': double.tryParse(
+                              purchaseCtrl.text.replaceAll(',', '.')) ??
+                          0.0,
+                      'marginPercent': double.tryParse(
+                              marginCtrl.text.replaceAll(',', '.')) ??
+                          10,
                       'price': double.tryParse(
                               priceCtrl.text.replaceAll(',', '.')) ??
                           0.0,
@@ -617,8 +600,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                       'taxable': taxable,
                       'requiresPrescription': requiresRx,
                       'providerId': providerId,
-                      'unitsPerPack':
-                          int.tryParse(unitsCtrl.text) ?? 1,
+                      'unitsPerPack': int.tryParse(unitsCtrl.text) ?? 1,
                       'createdAt': FieldValue.serverTimestamp(),
                     };
                     try {
@@ -650,7 +632,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       return;
     }
 
-    // Validaciones por línea
     for (var i = 0; i < _lines.length; i++) {
       final l = _lines[i];
       if (!l.isNew && (l.productId == null || l.productId!.isEmpty)) {
@@ -672,7 +653,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       }
     }
 
-    // Determinar proveedor para ingreso y movements
     String? providerIdForDb;
     String providerNameForMovement = 'Proveedor';
 
@@ -681,13 +661,11 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       QueryDocumentSnapshot? provDoc;
       if (_providers != null && _providers!.isNotEmpty) {
         try {
-          provDoc = _providers!.firstWhere(
-              (p) => p.id == providerIdForDb);
+          provDoc = _providers!.firstWhere((p) => p.id == providerIdForDb);
         } catch (_) {}
       }
       if (provDoc != null) {
-        final data =
-            provDoc.data() as Map<String, dynamic>;
+        final data = provDoc.data() as Map<String, dynamic>;
         providerNameForMovement =
             (data['name'] ?? providerNameForMovement).toString();
       } else {
@@ -695,8 +673,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       }
     } else if (_providers != null && _providers!.isNotEmpty) {
       providerIdForDb = _providers!.first.id;
-      final data =
-          _providers!.first.data() as Map<String, dynamic>;
+      final data = _providers!.first.data() as Map<String, dynamic>;
       providerNameForMovement =
           (data['name'] ?? 'Proveedor').toString();
     }
@@ -704,9 +681,8 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     setState(() => _loading = true);
 
     try {
-      await FirebaseFirestore.instance
-          .runTransaction((tx) async {
-        // 1) Crear productos nuevos (si los hay)
+      await FirebaseFirestore.instance.runTransaction((tx) async {
+        // nuevos productos
         for (final l in _lines.where((x) => x.isNew)) {
           final newRef = productsRef.doc();
           tx.set(newRef, {
@@ -726,7 +702,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           l.isNew = false;
         }
 
-        // 2) Validar productos existentes y guardar snapshot
+        // snapshots de productos
         final Map<String, Map<String, dynamic>> productSnapshots = {};
         for (final l in _lines) {
           final prodRef = productsRef.doc(l.productId);
@@ -738,24 +714,18 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
               prodSnap.data() as Map<String, dynamic>;
         }
 
-        // 3) Crear documento de ingreso
         final ingresoRef = ingresosRef.doc();
 
-        // para calcular stockBefore / stockAfter por producto
         final Map<String, int> accumulatedByProduct = {};
 
         final itemsForDb = _lines.map((l) {
           final pid = l.productId!;
-          final existingData =
-              productSnapshots[pid] ?? {};
-          final baseStock =
-              _toInt(existingData['stock']);
-          final alreadyAdded =
-              accumulatedByProduct[pid] ?? 0;
+          final existingData = productSnapshots[pid] ?? {};
+          final baseStock = _toInt(existingData['stock']);
+          final alreadyAdded = accumulatedByProduct[pid] ?? 0;
           final stockBefore = baseStock + alreadyAdded;
           final stockAfter = stockBefore + l.qty;
-          accumulatedByProduct[pid] =
-              alreadyAdded + l.qty;
+          accumulatedByProduct[pid] = alreadyAdded + l.qty;
 
           Map<String, dynamic> productData;
           if (_prodMap.containsKey(pid)) {
@@ -774,22 +744,18 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
             'productId': pid,
             'productName': productData['name'],
             'sku': productData['sku'],
-            'qty': l.qty, // int
+            'qty': l.qty,
             'purchasePrice':
                 _toDouble(l.purchasePrice.toStringAsFixed(2)),
-            'salePrice':
-                _toDouble(l.salePrice.toStringAsFixed(2)),
-            'subtotal':
-                _toDouble(l.subtotal.toStringAsFixed(2)),
-            'lot':
-                l.lot.trim().isEmpty ? null : l.lot.trim(),
+            'salePrice': _toDouble(l.salePrice.toStringAsFixed(2)),
+            'subtotal': _toDouble(l.subtotal.toStringAsFixed(2)),
+            'lot': l.lot.trim().isEmpty ? null : l.lot.trim(),
             'manufactureDate': l.manufactureDate != null
                 ? Timestamp.fromDate(l.manufactureDate!)
                 : null,
             'expiryDate': l.expiryDate != null
                 ? Timestamp.fromDate(l.expiryDate!)
                 : null,
-            // ⬇️ para detalle de movimientos
             'stockBefore': stockBefore,
             'stockAfter': stockAfter,
           };
@@ -807,19 +773,15 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           'createdAt': FieldValue.serverTimestamp(),
         });
 
-        // 3b) Crear resumen en 'movements'
         final movementsRef =
             FirebaseFirestore.instance.collection('movements');
         final movementDocRef = movementsRef.doc();
 
         final currentUser = FirebaseAuth.instance.currentUser;
-        final createdByName = currentUser?.displayName ??
-            currentUser?.email ??
-            'Usuario';
-        final totalItems = itemsForDb.fold<int>(
-          0,
-          (s, it) => s + (it['qty'] as int),
-        );
+        final createdByName =
+            currentUser?.displayName ?? currentUser?.email ?? 'Usuario';
+        final totalItems =
+            itemsForDb.fold<int>(0, (s, it) => s + (it['qty'] as int));
 
         tx.set(movementDocRef, {
           'type': 'ingreso',
@@ -835,15 +797,13 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           'items': itemsForDb,
         });
 
-        // 4) Para cada línea: crear batch en subcollection y actualizar stock/precios
         for (final l in _lines) {
           final prodRef = productsRef.doc(l.productId);
 
-          // crear batch
           final batchRef = prodRef.collection('batches').doc();
           tx.set(batchRef, {
             'lot': l.lot.trim().isNotEmpty ? l.lot.trim() : null,
-            'qty': l.qty, // int
+            'qty': l.qty,
             'expiryDate': l.expiryDate != null
                 ? Timestamp.fromDate(l.expiryDate!)
                 : null,
@@ -852,7 +812,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
             'createdAt': FieldValue.serverTimestamp(),
           });
 
-          // actualizar producto (incrementando stock)
           tx.update(prodRef, {
             'stock': FieldValue.increment(l.qty),
             'purchasePrice': l.purchasePrice,
@@ -872,7 +831,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     }
   }
 
-  // ====== IMPRIMIR ingreso ======
+  // ===== IMPRIMIR ingreso =====
   Future<void> _print() async {
     if (_lines.isEmpty) {
       _showSnack('No hay ítems para imprimir.');
@@ -880,19 +839,14 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     }
     final now = DateTime.now();
     final items = _lines.map((l) {
-      final baseName = l.isNew
-          ? l.newName
-          : (_prodMap[l.productId]?['name'] ?? 'Producto');
-      final lotPart =
-          (l.lot.trim().isNotEmpty ? 'Lote: ${l.lot.trim()}' : '');
-      final expiryPart = (l.expiryDate != null
-          ? 'Vence: ${_fmtDate(l.expiryDate!)}'
-          : '');
-      final extra = [lotPart, expiryPart]
-          .where((s) => s.isNotEmpty)
-          .join(' • ');
-      final displayName =
-          extra.isEmpty ? baseName : '$baseName  ($extra)';
+      final baseName =
+          l.isNew ? l.newName : (_prodMap[l.productId]?['name'] ?? 'Producto');
+      final lotPart = (l.lot.trim().isNotEmpty ? 'Lote: ${l.lot.trim()}' : '');
+      final expiryPart =
+          (l.expiryDate != null ? 'Vence: ${_fmtDate(l.expiryDate!)}' : '');
+      final extra =
+          [lotPart, expiryPart].where((s) => s.isNotEmpty).join(' • ');
+      final displayName = extra.isEmpty ? baseName : '$baseName  ($extra)';
       return InvoiceItem(
         name: displayName,
         qty: l.qty,
@@ -923,12 +877,10 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     );
   }
 
-  // ====== UI ======
   @override
   Widget build(BuildContext context) {
     final isWide = MediaQuery.of(context).size.width >= 900;
 
-    // Detectar si ya hay Scaffold/Material
     final hasMaterialAncestor =
         context.findAncestorWidgetOfExactType<Material>() != null;
     final hasScaffoldAncestor =
@@ -948,8 +900,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                   child: SingleChildScrollView(
                     padding: const EdgeInsets.all(16.0),
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Gestión de Compras',
@@ -961,27 +912,23 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                         ),
                         const SizedBox(height: 12),
 
-                        // BUSCADOR tipo egresos
+                        // BUSCADOR
                         Container(
                           decoration: BoxDecoration(
                             color: Colors.green.shade50,
-                            borderRadius:
-                                BorderRadius.circular(8),
-                            border: Border.all(
-                                color: Colors.green.shade100),
+                            borderRadius: BorderRadius.circular(8),
+                            border:
+                                Border.all(color: Colors.green.shade100),
                           ),
                           child: TextField(
                             controller: productFilterCtrl,
-                            decoration:
-                                const InputDecoration(
+                            decoration: const InputDecoration(
                               prefixIcon: Icon(Icons.search),
                               hintText:
                                   'Buscar producto (nombre, descripción o SKU)...',
                               border: InputBorder.none,
-                              contentPadding:
-                                  EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 14),
+                              contentPadding: EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 14),
                             ),
                           ),
                         ),
@@ -989,118 +936,81 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                         if (_filteredProducts.isNotEmpty)
                           const SizedBox(height: 10),
 
-                        // SUGERENCIAS
                         if (_filteredProducts.isNotEmpty)
                           Container(
                             constraints:
-                                const BoxConstraints(
-                                    maxHeight: 220),
+                                const BoxConstraints(maxHeight: 220),
                             child: ListView.builder(
                               shrinkWrap: true,
-                              itemCount:
-                                  _filteredProducts.length,
-                              itemBuilder:
-                                  (context, i) {
-                                final p =
-                                    _filteredProducts[i];
-                                final d = p.data()
-                                    as Map<String, dynamic>;
-                                final stock =
-                                    _toInt(d['stock']);
+                              itemCount: _filteredProducts.length,
+                              itemBuilder: (context, i) {
+                                final p = _filteredProducts[i];
+                                final d =
+                                    p.data() as Map<String, dynamic>;
+                                final stock = _toInt(d['stock']);
                                 final purchase =
-                                    _toDouble(
-                                        d['purchasePrice']);
-                                final margin = _toDouble(
-                                    d['marginPercent'] ??
-                                        10);
+                                    _toDouble(d['purchasePrice']);
+                                final margin =
+                                    _toDouble(d['marginPercent'] ?? 10);
                                 final suggestedSale =
-                                    purchase *
-                                        (1 +
-                                            (margin / 100));
+                                    purchase * (1 + (margin / 100));
                                 final name =
-                                    (d['name']
-                                            as String?) ??
-                                        p.id;
+                                    (d['name'] as String?) ?? p.id;
                                 final form =
-                                    (d['pharmForm'] ?? '')
-                                        .toString();
+                                    (d['pharmForm'] ?? '').toString();
                                 final route =
-                                    (d['route'] ?? '')
-                                        .toString();
+                                    (d['route'] ?? '').toString();
                                 final strength =
-                                    (d['strength'] ?? '')
-                                        .toString();
+                                    (d['strength'] ?? '').toString();
                                 final pres =
-                                    (d['presentation'] ??
-                                            '')
-                                        .toString();
+                                    (d['presentation'] ?? '').toString();
 
                                 return Padding(
                                   padding:
-                                      const EdgeInsets
-                                          .only(
-                                              bottom:
-                                                  8.0),
+                                      const EdgeInsets.only(bottom: 8.0),
                                   child: Row(
                                     crossAxisAlignment:
-                                        CrossAxisAlignment
-                                            .start,
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Expanded(
-                                        child:
-                                            Container(
+                                        child: Container(
                                           padding:
-                                              const EdgeInsets
-                                                  .all(
-                                                      12),
-                                          decoration:
-                                              BoxDecoration(
+                                              const EdgeInsets.all(12),
+                                          decoration: BoxDecoration(
                                             color: Colors
-                                                .green
-                                                .shade100,
+                                                .green.shade100,
                                             borderRadius:
-                                                BorderRadius
-                                                    .circular(
-                                                        8),
+                                                BorderRadius.circular(8),
                                           ),
                                           child: Column(
                                             crossAxisAlignment:
-                                                CrossAxisAlignment
-                                                    .start,
+                                                CrossAxisAlignment.start,
                                             children: [
                                               Text(
                                                 name,
-                                                maxLines:
-                                                    2,
-                                                overflow:
-                                                    TextOverflow
-                                                        .ellipsis,
+                                                maxLines: 2,
+                                                overflow: TextOverflow
+                                                    .ellipsis,
                                                 style: const TextStyle(
-                                                    fontWeight: FontWeight.bold),
+                                                    fontWeight:
+                                                        FontWeight.bold),
                                               ),
-                                              const SizedBox(
-                                                  height:
-                                                      4),
+                                              const SizedBox(height: 4),
                                               Wrap(
-                                                spacing:
-                                                    10,
-                                                runSpacing:
-                                                    6,
+                                                spacing: 10,
+                                                runSpacing: 6,
                                                 children: [
                                                   if (form.isNotEmpty ||
                                                       route.isNotEmpty)
                                                     _pill(
                                                         '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
-                                                  if (strength
-                                                      .isNotEmpty)
+                                                  if (strength.isNotEmpty)
                                                     _pill(
                                                         'Conc.: $strength'),
-                                                  if (pres
-                                                      .isNotEmpty)
+                                                  if (pres.isNotEmpty)
                                                     _pill(
                                                         'Pres.: $pres'),
-                                                  _pill(
-                                                      'Stock: $stock'),
+                                                  _pill('Stock: $stock'),
                                                   _pill(
                                                       'Compra: \$${purchase.toStringAsFixed(2)}'),
                                                   _pill(
@@ -1111,39 +1021,33 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(
-                                          width: 8),
+                                      const SizedBox(width: 8),
                                       Column(
                                         children: [
                                           ElevatedButton(
-                                            onPressed:
-                                                () =>
-                                                    _showDetailsDialog(d),
-                                            style:
-                                                ElevatedButton.styleFrom(
+                                            onPressed: () =>
+                                                _showDetailsDialog(d),
+                                            style: ElevatedButton.styleFrom(
                                               backgroundColor:
                                                   Colors.green,
                                               foregroundColor:
                                                   Colors.white,
                                             ),
-                                            child: const Text(
-                                                'Detalles'),
+                                            child:
+                                                const Text('Detalles'),
                                           ),
-                                          const SizedBox(
-                                              height:
-                                                  8),
+                                          const SizedBox(height: 8),
                                           ElevatedButton(
-                                            onPressed:
-                                                () => _addFromQuickList(p),
-                                            style:
-                                                ElevatedButton.styleFrom(
+                                            onPressed: () =>
+                                                _addFromQuickList(p),
+                                            style: ElevatedButton.styleFrom(
                                               backgroundColor:
                                                   Colors.green,
                                               foregroundColor:
                                                   Colors.white,
                                             ),
-                                            child: const Text(
-                                                'Agregar'),
+                                            child:
+                                                const Text('Agregar'),
                                           ),
                                         ],
                                       ),
@@ -1156,22 +1060,20 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
 
                         const SizedBox(height: 12),
 
-                        // Acciones sobre líneas
-                        Row(
+                        // Acciones sobre líneas (Wrap para evitar overflow)
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
                           children: [
                             ElevatedButton.icon(
                               onPressed: _addEmptyLine,
                               icon: const Icon(Icons.add),
-                              label:
-                                  const Text('Agregar línea'),
-                              style:
-                                  ElevatedButton.styleFrom(
+                              label: const Text('Agregar línea'),
+                              style: ElevatedButton.styleFrom(
                                 backgroundColor: kGreen2,
-                                foregroundColor:
-                                    Colors.white,
+                                foregroundColor: Colors.white,
                               ),
                             ),
-                            const SizedBox(width: 8),
                             ElevatedButton.icon(
                               onPressed: () async {
                                 final newId =
@@ -1182,15 +1084,11 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                                       'Producto creado y listo para seleccionar.');
                                 }
                               },
-                              icon: const Icon(
-                                  Icons.add_box_outlined),
-                              label: const Text(
-                                  'Nuevo producto'),
-                              style:
-                                  ElevatedButton.styleFrom(
+                              icon: const Icon(Icons.add_box_outlined),
+                              label: const Text('Nuevo producto'),
+                              style: ElevatedButton.styleFrom(
                                 backgroundColor: kGreen2,
-                                foregroundColor:
-                                    Colors.white,
+                                foregroundColor: Colors.white,
                               ),
                             ),
                           ],
@@ -1198,84 +1096,64 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
 
                         const SizedBox(height: 12),
 
-                        // Encabezado (solo en pantallas medianas/anchas)
                         if (isWide)
                           Container(
-                            padding:
-                                const EdgeInsets.symmetric(
+                            padding: const EdgeInsets.symmetric(
                               vertical: 6,
                               horizontal: 8,
                             ),
                             decoration: BoxDecoration(
                               color: Colors.grey.shade100,
-                              borderRadius:
-                                  BorderRadius.circular(
-                                      6),
+                              borderRadius: BorderRadius.circular(6),
                             ),
                             child: Row(
                               children: const [
-                                Expanded(
-                                    child:
-                                        Text('Producto')),
+                                Expanded(child: Text('Producto')),
                                 SizedBox(
-                                    width: 80,
-                                    child: Text('Cant.')),
+                                    width: 80, child: Text('Cant.')),
                                 SizedBox(
-                                    width: 140,
-                                    child: Text('Compra')),
+                                    width: 140, child: Text('Compra')),
                                 SizedBox(
-                                    width: 140,
-                                    child: Text(
-                                        'Venta sug.')),
+                                    width: 140, child: Text('Venta sug.')),
                                 SizedBox(width: 40, child: Text('')),
                               ],
                             ),
                           ),
                         if (isWide) const SizedBox(height: 8),
 
-                        // Líneas
                         ListView.builder(
                           shrinkWrap: true,
                           physics:
                               const NeverScrollableScrollPhysics(),
                           itemCount: _lines.length,
                           itemBuilder: (context, idx) =>
-                              _lineTile(
-                                  _lines[idx], idx, isWide),
+                              _lineTile(_lines[idx], idx, isWide),
                         ),
 
                         const SizedBox(height: 12),
 
-                        // Proveedor, factura, fecha
                         Row(
                           children: [
                             Expanded(
                               child:
-                                  DropdownButtonFormField<
-                                      String>(
+                                  DropdownButtonFormField<String>(
                                 value: _providers != null &&
-                                        _providers!
-                                            .isNotEmpty
+                                        _providers!.isNotEmpty
                                     ? _providers!.first.id
                                     : null,
                                 items: _providers
                                     ?.map((p) {
                                       final d = p.data()
-                                          as Map<String,
-                                              dynamic>;
+                                          as Map<String, dynamic>;
                                       return DropdownMenuItem(
                                         value: p.id,
-                                        child:
-                                            Text(d['name'] ??
-                                                '—'),
+                                        child: Text(d['name'] ?? '—'),
                                       );
                                     })
                                     .toList(),
                                 onChanged: (v) =>
-                                    providerCtrl.text =
-                                        v ?? '',
-                                decoration:
-                                    const InputDecoration(
+                                    providerCtrl.text = v ?? '',
+                                decoration: const InputDecoration(
                                   labelText: 'Proveedor',
                                 ),
                               ),
@@ -1285,10 +1163,8 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                               width: 220,
                               child: TextFormField(
                                 controller: invoiceCtrl,
-                                decoration:
-                                    const InputDecoration(
-                                  labelText:
-                                      'N° factura / serie',
+                                decoration: const InputDecoration(
+                                  labelText: 'N° factura / serie',
                                 ),
                               ),
                             ),
@@ -1306,38 +1182,28 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                             ),
                             TextButton(
                               onPressed: () async {
-                                final now =
-                                    DateTime.now();
-                                final d =
-                                    await showDatePicker(
+                                final now = DateTime.now();
+                                final d = await showDatePicker(
                                   context: context,
                                   initialDate:
-                                      purchaseDate ??
-                                          now,
+                                      purchaseDate ?? now,
                                   firstDate:
-                                      DateTime(
-                                          now.year -
-                                              5),
+                                      DateTime(now.year - 5),
                                   lastDate:
-                                      DateTime(
-                                          now.year +
-                                              1),
+                                      DateTime(now.year + 1),
                                 );
                                 if (d != null) {
                                   setState(() =>
-                                      purchaseDate =
-                                          d);
+                                      purchaseDate = d);
                                 }
                               },
-                              child:
-                                  const Text('Seleccionar'),
+                              child: const Text('Seleccionar'),
                             ),
                           ],
                         ),
 
                         const SizedBox(height: 16),
 
-                        // Acciones rápidas + total
                         Wrap(
                           spacing: 10,
                           runSpacing: 8,
@@ -1346,57 +1212,40 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                           children: [
                             ElevatedButton(
                               onPressed: _lines.isEmpty &&
-                                      providerCtrl
-                                          .text.isEmpty &&
-                                      invoiceCtrl
-                                          .text.isEmpty &&
-                                      purchaseDate ==
-                                          null
+                                      providerCtrl.text.isEmpty &&
+                                      invoiceCtrl.text.isEmpty &&
+                                      purchaseDate == null
                                   ? null
                                   : _clearAll,
-                              style:
-                                  ElevatedButton.styleFrom(
-                                backgroundColor:
-                                    Colors.green,
-                                foregroundColor:
-                                    Colors.white,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                foregroundColor: Colors.white,
                               ),
-                              child:
-                                  const Text('L  •  Limpiar'),
+                              child: const Text('L  •  Limpiar'),
                             ),
                             ElevatedButton(
                               onPressed:
-                                  _lines.isEmpty
-                                      ? null
-                                      : _print,
-                              style:
-                                  ElevatedButton.styleFrom(
-                                backgroundColor:
-                                    Colors.green,
-                                foregroundColor:
-                                    Colors.white,
+                                  _lines.isEmpty ? null : _print,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                foregroundColor: Colors.white,
                               ),
-                              child: const Text(
-                                  'I  •  Imprimir PDF'),
+                              child: const Text('I  •  Imprimir PDF'),
                             ),
                             const SizedBox(width: 12),
                             Text(
                               'Total: \$${_total.toStringAsFixed(2)}',
                               style: const TextStyle(
                                 fontSize: 18,
-                                fontWeight:
-                                    FontWeight.bold,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
                             ElevatedButton(
-                              onPressed: _loading
-                                  ? null
-                                  : _save,
-                              style:
-                                  ElevatedButton.styleFrom(
+                              onPressed:
+                                  _loading ? null : _save,
+                              style: ElevatedButton.styleFrom(
                                 backgroundColor: kGreen2,
-                                foregroundColor:
-                                    Colors.white,
+                                foregroundColor: Colors.white,
                               ),
                               child: _loading
                                   ? const SizedBox(
@@ -1407,8 +1256,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                                         strokeWidth: 2,
                                       ),
                                     )
-                                  : const Text(
-                                      'Registrar compra'),
+                                  : const Text('Registrar compra'),
                             ),
                           ],
                         ),
@@ -1424,7 +1272,6 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       return content;
     }
 
-    // Ruta independiente
     return Material(
       child: Scaffold(
         appBar: AppBar(
@@ -1441,12 +1288,11 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     final nameForExisting = ln.productId != null
         ? (_prodMap[ln.productId]?['name'] ?? 'Producto')
         : 'Producto';
-    final titleText =
-        ln.isNew ? 'Nuevo producto' : nameForExisting;
+    final titleText = ln.isNew ? 'Nuevo producto' : nameForExisting;
 
-    final productSelector =
-        DropdownButtonFormField<String>(
+    final productSelector = DropdownButtonFormField<String>(
       value: ln.productId,
+      isExpanded: true, // ⬅️ importante para evitar overflow
       items: (_products ?? []).map((p) {
         final d = p.data() as Map<String, dynamic>;
         final stock = _toInt(d['stock']);
@@ -1536,11 +1382,9 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           width: 130,
           child: TextFormField(
             key: ValueKey('purchasePrice_$idx'),
-            initialValue:
-                ln.purchasePrice.toStringAsFixed(2),
+            initialValue: ln.purchasePrice.toStringAsFixed(2),
             keyboardType:
-                const TextInputType.numberWithOptions(
-                    decimal: true),
+                const TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(
               labelText: 'Compra',
               border: InputBorder.none,
@@ -1550,8 +1394,8 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                 ln.purchasePrice = _toDouble(v);
                 final margin = 10.0;
                 if (ln.salePrice == 0) {
-                  ln.salePrice = ln.purchasePrice *
-                      (1 + (margin / 100));
+                  ln.salePrice =
+                      ln.purchasePrice * (1 + (margin / 100));
                 }
               });
             },
@@ -1561,11 +1405,9 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           width: 130,
           child: TextFormField(
             key: ValueKey('salePrice_$idx'),
-            initialValue:
-                ln.salePrice.toStringAsFixed(2),
+            initialValue: ln.salePrice.toStringAsFixed(2),
             keyboardType:
-                const TextInputType.numberWithOptions(
-                    decimal: true),
+                const TextInputType.numberWithOptions(decimal: true),
             decoration: const InputDecoration(
               labelText: 'Venta sug.',
               border: InputBorder.none,
@@ -1583,8 +1425,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
               labelText: 'Lote',
               border: InputBorder.none,
             ),
-            onChanged: (v) =>
-                setState(() => ln.lot = v),
+            onChanged: (v) => setState(() => ln.lot = v),
           ),
         ),
         IconButton(
@@ -1602,8 +1443,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
             ? Column(
                 children: [
                   Row(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(child: left),
                       const SizedBox(width: 8),
@@ -1630,29 +1470,26 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                       ),
                       TextButton(
                         onPressed: () =>
-                            _pickDateForLine(idx,
-                                isManufacture: true),
+                            _pickDateForLine(idx, isManufacture: true),
                         child: const Text('Fab.'),
                       ),
                       TextButton(
                         onPressed: () =>
-                            _pickDateForLine(idx,
-                                isManufacture: false),
+                            _pickDateForLine(idx, isManufacture: false),
                         child: const Text('Vence'),
                       ),
                       const SizedBox(width: 12),
                       Text(
                         'Subtotal: \$${ln.subtotal.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.bold),
+                        style:
+                            const TextStyle(fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
                 ],
               )
             : Column(
-                crossAxisAlignment:
-                    CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     titleText,
@@ -1686,8 +1523,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                       ),
                       TextButton(
                         onPressed: () =>
-                            _pickDateForLine(idx,
-                                isManufacture: true),
+                            _pickDateForLine(idx, isManufacture: true),
                         child: const Text('Seleccionar'),
                       ),
                       const SizedBox(width: 8),
@@ -1700,8 +1536,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                       ),
                       TextButton(
                         onPressed: () =>
-                            _pickDateForLine(idx,
-                                isManufacture: false),
+                            _pickDateForLine(idx, isManufacture: false),
                         child: const Text('Seleccionar'),
                       ),
                     ],
@@ -1733,9 +1568,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     });
   }
 
-  // ====== Detalles ======
-  Future<void> _showDetailsDialog(
-      Map<String, dynamic> d) async {
+  Future<void> _showDetailsDialog(Map<String, dynamic> d) async {
     if (d.isEmpty) return;
     final name = (d['name'] ?? 'Producto').toString();
     final price = _toDouble(d['price']);
@@ -1743,14 +1576,11 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     final stock = _toInt(d['stock']);
     final taxable = (d['taxable'] ?? false) == true;
     final iva = _toDouble(d['ivaPercent'] ?? 13);
-    final expiry =
-        (d['expiryDate'] as Timestamp?)?.toDate();
+    final expiry = (d['expiryDate'] as Timestamp?)?.toDate();
     final form = (d['pharmForm'] ?? '').toString();
     final route = (d['route'] ?? '').toString();
-    final strength =
-        (d['strength'] ?? '').toString();
-    final pres =
-        (d['presentation'] ?? '').toString();
+    final strength = (d['strength'] ?? '').toString();
+    final pres = (d['presentation'] ?? '').toString();
     final requiresRx =
         (d['requiresPrescription'] ?? false) == true;
 
@@ -1764,30 +1594,23 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           children: [
             _kv('SKU', (d['sku'] ?? '—').toString()),
             _kv('Stock', '$stock'),
-            _kv('Precio compra',
-                '\$${purchase.toStringAsFixed(2)}'),
-            _kv('Precio venta',
-                '\$${price.toStringAsFixed(2)}'),
-            _kv('IVA',
-                taxable ? '${iva.toStringAsFixed(0)}%' : 'No grava'),
-            if (expiry != null)
-              _kv('Vencimiento', _fmtDate(expiry)),
+            _kv('Precio compra', '\$${purchase.toStringAsFixed(2)}'),
+            _kv('Precio venta', '\$${price.toStringAsFixed(2)}'),
+            _kv('IVA', taxable ? '${iva.toStringAsFixed(0)}%' : 'No grava'),
+            if (expiry != null) _kv('Vencimiento', _fmtDate(expiry)),
             if (form.isNotEmpty || route.isNotEmpty)
               _kv(
                 'Forma/Vía',
                 '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}',
               ),
-            if (strength.isNotEmpty)
-              _kv('Concentración', strength),
-            if (pres.isNotEmpty)
-              _kv('Presentación', pres),
+            if (strength.isNotEmpty) _kv('Concentración', strength),
+            if (pres.isNotEmpty) _kv('Presentación', pres),
             if (requiresRx)
               const Padding(
                 padding: EdgeInsets.only(top: 8.0),
                 child: Row(
                   children: [
-                    Icon(Icons.warning_amber,
-                        color: Colors.red),
+                    Icon(Icons.warning_amber, color: Colors.red),
                     SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -1820,10 +1643,8 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
               if (newId != null) {
                 await _loadData();
                 Navigator.pop(c);
-                final basePurchase =
-                    _toDouble(d['purchasePrice']);
-                final baseMargin =
-                    _toDouble(d['marginPercent'] ?? 10);
+                final basePurchase = _toDouble(d['purchasePrice']);
+                final baseMargin = _toDouble(d['marginPercent'] ?? 10);
                 final suggestedSale =
                     basePurchase * (1 + baseMargin / 100);
                 setState(() {
@@ -1855,8 +1676,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
               width: 140,
               child: Text(
                 k,
-                style: const TextStyle(
-                    fontWeight: FontWeight.w600),
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
             Expanded(child: Text(v)),
@@ -1874,8 +1694,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
         ),
         decoration: BoxDecoration(
           color: Colors.white,
-          border:
-              Border.all(color: Colors.green.shade300),
+          border: Border.all(color: Colors.green.shade300),
           borderRadius: BorderRadius.circular(999),
         ),
         child: Text(

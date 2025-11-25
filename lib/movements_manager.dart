@@ -269,10 +269,12 @@ class _MovementsManagerState extends State<MovementsManager> {
   // ====== UI ======
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final bool isMobile = constraints.maxWidth < 800;
+
+        // -------- TOOLBAR ESCRITORIO (igual que antes) --------
+        final desktopToolbar = Row(
           children: [
             Text(
               'Movimientos',
@@ -300,8 +302,7 @@ class _MovementsManagerState extends State<MovementsManager> {
                 ),
               ],
               selected: <_View>{_view},
-              onSelectionChanged: (s) =>
-                  setState(() => _view = s.first),
+              onSelectionChanged: (s) => setState(() => _view = s.first),
             ),
             const SizedBox(width: 12),
             OutlinedButton.icon(
@@ -342,76 +343,173 @@ class _MovementsManagerState extends State<MovementsManager> {
               label: const Text('Nuevo egreso'),
             ),
           ],
-        ),
-        const SizedBox(height: 12),
-        if (_busy) const LinearProgressIndicator(minHeight: 2),
+        );
 
-        // ====== LISTADOS ======
-        StreamBuilder<QuerySnapshot>(
-          stream: _buildQuery().snapshots(),
-          builder: (context, snap) {
-            if (snap.hasError) {
-              return const Text('Error al cargar movimientos');
-            }
-            if (!snap.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            final allDocs = snap.data!.docs;
-
-            // Separamos activos y eliminados
-            final activeDocs = allDocs.where((d) {
-              final m = d.data() as Map<String, dynamic>;
-              final isDeleted = m['deleted'] == true;
-              if (isDeleted) return false;
-              return _matchesView(m);
-            }).toList();
-
-            final deletedDocs = allDocs.where((d) {
-              final m = d.data() as Map<String, dynamic>;
-              final isDeleted = m['deleted'] == true;
-              if (!isDeleted) return false;
-              return _matchesView(m);
-            }).toList();
-
-            return LayoutBuilder(
-              builder: (context, constraints) {
-                final isMobile = constraints.maxWidth < 800;
-
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildMovementsSection(
-                      context,
-                      isMobile: isMobile,
-                      documents: activeDocs,
-                      deletedSection: false,
-                    ),
-                    const SizedBox(height: 16),
-                    if (deletedDocs.isNotEmpty) ...[
-                      const Divider(),
-                      Text(
-                        'Movimientos eliminados',
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(color: Colors.grey[700]),
+        // -------- TOOLBAR MÓVIL (adaptado, sin overflow) --------
+        final mobileToolbar = Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Movimientos',
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            // Fila 1: filtro de tipo + fechas (scroll horizontal)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  SegmentedButton<_View>(
+                    segments: const [
+                      ButtonSegment(
+                        value: _View.all,
+                        label: Text('Todos'),
+                        icon: Icon(Icons.all_inbox),
                       ),
-                      const SizedBox(height: 8),
-                      _buildMovementsSection(
-                        context,
-                        isMobile: isMobile,
-                        documents: deletedDocs,
-                        deletedSection: true,
+                      ButtonSegment(
+                        value: _View.ingresos,
+                        label: Text('Ingresos'),
+                        icon: Icon(Icons.trending_up),
+                      ),
+                      ButtonSegment(
+                        value: _View.egresos,
+                        label: Text('Egresos'),
+                        icon: Icon(Icons.trending_down),
                       ),
                     ],
-                  ],
+                    selected: <_View>{_view},
+                    onSelectionChanged: (s) =>
+                        setState(() => _view = s.first),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: _pickDateRange,
+                    icon: const Icon(Icons.date_range),
+                    label: Text(
+                      (_from == null || _to == null)
+                          ? 'Rango de fechas'
+                          : '${_from!.day}/${_from!.month}/${_from!.year} - '
+                              '${_to!.day}/${_to!.month}/${_to!.year}',
+                    ),
+                  ),
+                  if (_from != null || _to != null)
+                    IconButton(
+                      tooltip: 'Limpiar',
+                      onPressed: () => setState(() {
+                        _from = null;
+                        _to = null;
+                      }),
+                      icon: const Icon(Icons.clear),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Fila 2: imprimir / nuevos movimientos (scroll horizontal)
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _printCurrentMovements,
+                    icon: const Icon(Icons.print),
+                    label: const Text('Imprimir'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _openIngresoFullScreen,
+                    icon: const Icon(Icons.add_shopping_cart),
+                    label: const Text('Nuevo ingreso'),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    onPressed: _openEgresoFullScreen,
+                    icon: const Icon(Icons.move_to_inbox),
+                    label: const Text('Nuevo egreso'),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            isMobile ? mobileToolbar : desktopToolbar,
+            const SizedBox(height: 12),
+            if (_busy) const LinearProgressIndicator(minHeight: 2),
+
+            // ====== LISTADOS ======
+            StreamBuilder<QuerySnapshot>(
+              stream: _buildQuery().snapshots(),
+              builder: (context, snap) {
+                if (snap.hasError) {
+                  return const Text('Error al cargar movimientos');
+                }
+                if (!snap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final allDocs = snap.data!.docs;
+
+                // Separamos activos y eliminados
+                final activeDocs = allDocs.where((d) {
+                  final m = d.data() as Map<String, dynamic>;
+                  final isDeleted = m['deleted'] == true;
+                  if (isDeleted) return false;
+                  return _matchesView(m);
+                }).toList();
+
+                final deletedDocs = allDocs.where((d) {
+                  final m = d.data() as Map<String, dynamic>;
+                  final isDeleted = m['deleted'] == true;
+                  if (!isDeleted) return false;
+                  return _matchesView(m);
+                }).toList();
+
+                return LayoutBuilder(
+                  builder: (context, constraints2) {
+                    final isMobile2 = constraints2.maxWidth < 800;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _buildMovementsSection(
+                          context,
+                          isMobile: isMobile2,
+                          documents: activeDocs,
+                          deletedSection: false,
+                        ),
+                        const SizedBox(height: 16),
+                        if (deletedDocs.isNotEmpty) ...[
+                          const Divider(),
+                          Text(
+                            'Movimientos eliminados',
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleMedium
+                                ?.copyWith(color: Colors.grey[700]),
+                          ),
+                          const SizedBox(height: 8),
+                          _buildMovementsSection(
+                            context,
+                            isMobile: isMobile2,
+                            documents: deletedDocs,
+                            deletedSection: true,
+                          ),
+                        ],
+                      ],
+                    );
+                  },
                 );
               },
-            );
-          },
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -516,8 +614,8 @@ class _MovementsManagerState extends State<MovementsManager> {
 
                   return ListTile(
                     dense: true,
-                    title: Text(
-                        '${it['productName']} (SKU: ${it['sku']})'),
+                    title:
+                        Text('${it['productName']} (SKU: ${it['sku']})'),
                     subtitle: Text(
                       'Cant: $qty • '
                       'P. unidad: ${unitPrice.toStringAsFixed(2)} • '
