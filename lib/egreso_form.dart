@@ -102,13 +102,13 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       final requiresRx = (pdata['requiresPrescription'] ?? false) == true;
       final discountPct = await _bestDiscountFor(pid, pdata);
 
-      // Calculamos precio de venta (incluye IVA si aplica) + aplicamos descuento
+      // Calculamos precio de venta (partiendo de precio SIN IVA) + aplicamos descuento y luego IVA
       final finalPrice = _computeSaleUnitPrice(pdata, discountPct);
 
       _addLine(
         productId: pid,
         name: pdata['name'] ?? 'Producto',
-        unitPrice: finalPrice,
+        unitPrice: finalPrice, // ya incluye IVA
         stock: _toInt(pdata['stock']),
         taxable: (pdata['taxable'] ?? false) == true,
         ivaPercent: _toDouble(pdata['ivaPercent'] ?? 13),
@@ -169,66 +169,49 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     return 0.0;
   }
 
-  // ========= LÓGICA PRECIO DE VENTA + IVA (ARREGLADA) =========
+  // ========= LÓGICA PRECIO DE VENTA + IVA (AJUSTADA) =========
   //
-  // Reglas:
-  // - Si el documento tiene 'price' lo tratamos como precio FINAL que ya incluye IVA (usar directamente).
-  // - Si existe 'salePriceNet' (o 'salePrice') lo tratamos como precio NETO (sin IVA): aplicar descuento y luego sumar IVA.
-  // - Si no hay ninguno: tomar 'price' como costo, aplicar margen (marginPercent / profitMargin / markup) para obtener neto,
-  //   aplicar descuento y luego sumar IVA.
-  //
-  // En todos los casos se aplica el descuento (promoción) sobre la base que realmente representa el precio al cliente,
-  // evitando sumar IVA dos veces o recalcular margen cuando ya hay un precio final guardado.
+  // Reglas (inventario almacenado SIN IVA):
+  // - 'salePriceNet' o 'salePrice'  -> precio de venta NETO (sin IVA).
+  // - Si no existen, 'price' se toma como precio de venta NETO (sin IVA).
+  // - Si hay marginPercent/profitMargin/markup, se aplica sobre ese base.
+  // - Luego se aplica descuento y, al final, el IVA (si el producto grava).
+  // - El valor retornado SIEMPRE será precio FINAL con IVA (para cobrar al cliente).
   double _computeSaleUnitPrice(Map<String, dynamic> pdata, double discountPct) {
-    // indicador si la base que tomamos ya incluye IVA
-    bool baseIncludesIva = false;
-
-    // 1) Preferir 'price' como precio final (incluye IVA) si está presente
-    if (pdata.containsKey('price')) {
-      final p = _toDouble(pdata['price']);
-      // Si 'price' existe, en tu BD suele ser precio final (vi en ejemplo: price = salePriceNet * 1.13)
-      baseIncludesIva = true;
-      double finalPrice = p;
-      // aplicar descuento directamente sobre precio final (que ya incluye IVA)
-      if (discountPct > 0) finalPrice = finalPrice * (1 - discountPct / 100);
-      return finalPrice;
-    }
-
-    // 2) Si existe campo explícito 'salePriceNet' o 'salePrice' (precio sin IVA), usarlo
-    if (pdata.containsKey('salePriceNet')) {
-      double baseNet = _toDouble(pdata['salePriceNet']);
-      if (discountPct > 0) baseNet = baseNet * (1 - discountPct / 100);
-      final iva = _toDouble(pdata['ivaPercent'] ?? 13);
-      final taxable = (pdata['taxable'] ?? false) == true;
-      if (taxable) baseNet = baseNet * (1 + iva / 100);
-      return baseNet;
-    }
-    if (pdata.containsKey('salePrice')) {
-      double baseNet = _toDouble(pdata['salePrice']);
-      if (discountPct > 0) baseNet = baseNet * (1 - discountPct / 100);
-      final iva = _toDouble(pdata['ivaPercent'] ?? 13);
-      final taxable = (pdata['taxable'] ?? false) == true;
-      if (taxable) baseNet = baseNet * (1 + iva / 100);
-      return baseNet;
-    }
-
-    // 3) Fallback: usar 'price' como costo + margin percent si existe (legacy)
-    final cost = _toDouble(pdata['price']);
-    final margin = _toDouble(pdata['marginPercent'] ?? pdata['profitMargin'] ?? pdata['markup'] ?? 0);
+    // 1) Determinar base neta (sin IVA)
     double baseNet;
-    if (margin != 0) {
-      baseNet = cost * (1 + margin / 100);
+
+    if (pdata.containsKey('salePriceNet')) {
+      baseNet = _toDouble(pdata['salePriceNet']);
+    } else if (pdata.containsKey('salePrice')) {
+      baseNet = _toDouble(pdata['salePrice']);
     } else {
-      // si no hay margen ni price neto, asumimos 'price' es ya price neto (lo tomamos como base neta)
-      baseNet = cost;
+      // Usamos 'price' como precio neto o costo + margen
+      final priceField = _toDouble(pdata['price']);
+      final margin =
+          _toDouble(pdata['marginPercent'] ?? pdata['profitMargin'] ?? pdata['markup'] ?? 0);
+      if (margin != 0) {
+        // priceField como costo y margin como % de ganancia
+        baseNet = priceField * (1 + margin / 100);
+      } else {
+        // si no hay margen, tomamos 'price' directamente como precio NETO de venta
+        baseNet = priceField;
+      }
     }
 
-    if (discountPct > 0) baseNet = baseNet * (1 - discountPct / 100);
+    // 2) Aplicar descuento sobre el precio neto
+    if (discountPct > 0) {
+      baseNet = baseNet * (1 - discountPct / 100);
+    }
 
+    // 3) Agregar IVA si el producto grava
     final iva = _toDouble(pdata['ivaPercent'] ?? 13);
     final taxable = (pdata['taxable'] ?? false) == true;
-    if (taxable) baseNet = baseNet * (1 + iva / 100);
+    if (taxable) {
+      baseNet = baseNet * (1 + iva / 100);
+    }
 
+    // Resultado: precio FINAL con IVA
     return baseNet;
   }
 
@@ -301,7 +284,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       SaleLine(
         productId: productId,
         name: name,
-        unitPrice: unitPrice,
+        unitPrice: unitPrice, // YA incluye IVA
         stock: stock,
         taxable: taxable,
         ivaPercent: ivaPercent,
@@ -344,11 +327,15 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
 
   double get _subtotalSinIVA => _total - _ivaTotal;
 
+  // Por ahora consideramos que el IVA retenido es igual al IVA generado.
+  // Si más adelante la retención es un porcentaje diferente, aquí se ajusta.
+  double get _ivaRetenido => _ivaTotal;
+
   bool _anyRequiresRecipe() {
     for (final l in _lines) {
       final p = _pmap[l.productId];
       if (p != null && (p['requiresPrescription'] ?? false) == true) return true;
-    }
+      }
     return false;
   }
 
@@ -359,7 +346,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       _showSnack('No hay productos para imprimir.');
       return;
     }
-    final buyer = buyerCtrl.text.trim().isEmpty ? 'Consumidor final' : buyerCtrl.text.trim();
+    final buyer =
+        buyerCtrl.text.trim().isEmpty ? 'Consumidor final' : buyerCtrl.text.trim();
     final now = when ?? DateTime.now();
 
     // Nota: por petición, el PDF mostrará el total y dejará la línea IVA en 0 para evitar confusiones
@@ -404,7 +392,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
 
       await FirebaseFirestore.instance.runTransaction((tx) async {
         // 1) Obtener/inicializar contador
-        final counterRef = FirebaseFirestore.instance.collection('counters').doc('egresos');
+        final counterRef =
+            FirebaseFirestore.instance.collection('counters').doc('egresos');
         final counterSnap = await tx.get(counterRef);
 
         int nextNumber;
@@ -430,7 +419,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           final prodData = prodSnap.data() as Map<String, dynamic>;
           final currentStock = _toInt(prodData['stock']);
           if (l.qty > currentStock) {
-            throw Exception('Stock insuficiente para "${l.name}". Disponible: $currentStock');
+            throw Exception(
+                'Stock insuficiente para "${l.name}". Disponible: $currentStock');
           }
           final stockAfter = currentStock - l.qty;
 
@@ -453,11 +443,14 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         tx.set(egresoDocRef, {
           'number': nextNumber,
           'userId': FirebaseAuth.instance.currentUser?.uid,
-          'buyer': buyerCtrl.text.trim().isEmpty ? 'Consumidor final' : buyerCtrl.text.trim(),
+          'buyer': buyerCtrl.text.trim().isEmpty
+              ? 'Consumidor final'
+              : buyerCtrl.text.trim(),
           'notes': notesCtrl.text.trim(),
           'items': itemsForSave,
           'subtotal': _subtotalSinIVA,
           'ivaTotal': _ivaTotal,
+          'ivaRetenido': _ivaRetenido,
           'total': _total,
           'createdAt': FieldValue.serverTimestamp(),
           'recipeChecked': _anyRequiresRecipe() ? _recipeChecked : null,
@@ -473,11 +466,13 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         }
 
         // 6) Crear resumen en 'movements' (para que MovementsManager lo muestre)
-        final movementsRef = FirebaseFirestore.instance.collection('movements');
+        final movementsRef =
+            FirebaseFirestore.instance.collection('movements');
         final movementDocRef = movementsRef.doc();
 
         final currentUser = FirebaseAuth.instance.currentUser;
-        final createdByName = currentUser?.displayName ?? currentUser?.email ?? 'Usuario';
+        final createdByName =
+            currentUser?.displayName ?? currentUser?.email ?? 'Usuario';
 
         tx.set(movementDocRef, {
           'type': 'egreso',
@@ -487,9 +482,14 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           'createdByName': createdByName,
           'note': notesCtrl.text.trim(),
           'counterpartyType': 'cliente',
-          'counterpartyName': buyerCtrl.text.trim().isEmpty ? 'Consumidor final' : buyerCtrl.text.trim(),
-          'totalItems': itemsForSave.fold<int>(0, (s, it) => s + (it['qty'] as int)),
+          'counterpartyName': buyerCtrl.text.trim().isEmpty
+              ? 'Consumidor final'
+              : buyerCtrl.text.trim(),
+          'totalItems':
+              itemsForSave.fold<int>(0, (s, it) => s + (it['qty'] as int)),
           'totalAmount': _total,
+          'ivaTotal': _ivaTotal,
+          'ivaRetenido': _ivaRetenido,
           'items': itemsForSave,
           'recipeChecked': _anyRequiresRecipe() ? _recipeChecked : null,
         });
@@ -525,8 +525,10 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   @override
   Widget build(BuildContext context) {
     // detectamos si ya hay un Scaffold/Material que provea el "look & feel"
-    final hasMaterialAncestor = context.findAncestorWidgetOfExactType<Material>() != null;
-    final hasScaffoldAncestor = context.findAncestorWidgetOfExactType<Scaffold>() != null;
+    final hasMaterialAncestor =
+        context.findAncestorWidgetOfExactType<Material>() != null;
+    final hasScaffoldAncestor =
+        context.findAncestorWidgetOfExactType<Scaffold>() != null;
 
     // El contenido real del formulario (tu Column completo)
     final content = Center(
@@ -534,7 +536,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         padding: const EdgeInsets.all(8.0),
         // Permitimos que el widget ocupe todo el ancho disponible del Card del Dashboard.
         child: SingleChildScrollView(
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // <-- Encabezado removido intencionalmente (lo pediste)
             const SizedBox(height: 4),
 
@@ -551,7 +554,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                   prefixIcon: Icon(Icons.search),
                   hintText: 'Buscar producto por nombre, descripción o SKU...',
                   border: InputBorder.none,
-                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 14),
                 ),
               ),
             ),
@@ -569,10 +573,11 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                     final pdoc = _filtered[i];
                     final d = pdoc.data() as Map<String, dynamic>;
                     final name = (d['name'] ?? 'Producto').toString();
-                    // Mostrar 'price' (si existe) porque suele ser precio final (incluye IVA)
-                    final displayPrice = _toDouble(d['price']);
+                    // AHORA interpretamos 'price' como precio SIN IVA
+                    final displayPriceNet = _toDouble(d['price']);
                     final stock = _toInt(d['stock']);
-                    final requiresRx = (d['requiresPrescription'] ?? false) == true;
+                    final requiresRx =
+                        (d['requiresPrescription'] ?? false) == true;
                     final form = (d['pharmForm'] ?? '').toString();
                     final route = (d['route'] ?? '').toString();
                     final strength = (d['strength'] ?? '').toString();
@@ -598,33 +603,44 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                                   Text(name,
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                                      style: const TextStyle(
+                                          fontWeight: FontWeight.bold)),
                                   const SizedBox(height: 4),
                                   Wrap(
                                     spacing: 10,
                                     runSpacing: 6,
                                     children: [
                                       if (form.isNotEmpty || route.isNotEmpty)
-                                        _pill('${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
-                                      if (strength.isNotEmpty) _pill('Conc.: $strength'),
-                                      if (pres.isNotEmpty) _pill('Pres.: $pres'),
+                                        _pill(
+                                            '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
+                                      if (strength.isNotEmpty)
+                                        _pill('Conc.: $strength'),
+                                      if (pres.isNotEmpty)
+                                        _pill('Pres.: $pres'),
                                       _pill('Stock: $stock'),
-                                      _pill('Precio: ${_fmt(displayPrice)}'),
-                                      if (inferredDisc > 0) _pill('Oferta: ${inferredDisc.toStringAsFixed(0)}%'),
+                                      _pill(
+                                          'Precio (sin IVA): ${_fmt(displayPriceNet)}'),
+                                      if (inferredDisc > 0)
+                                        _pill(
+                                            'Oferta: ${inferredDisc.toStringAsFixed(0)}%'),
                                     ],
                                   ),
                                   if (requiresRx) ...[
                                     const SizedBox(height: 6),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 6),
                                       decoration: BoxDecoration(
                                         color: Colors.red.shade50,
                                         borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(color: Colors.red.shade300),
+                                        border: Border.all(
+                                            color: Colors.red.shade300),
                                       ),
                                       child: const Text(
                                         'Este producto requiere receta médica.',
-                                        style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
+                                        style: TextStyle(
+                                            color: Colors.red,
+                                            fontWeight: FontWeight.w600),
                                       ),
                                     ),
                                   ],
@@ -652,22 +668,27 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                                 onPressed: stock <= 0
                                     ? null
                                     : () async {
-                                        final disc = await _bestDiscountFor(pdoc.id, d);
-                                        // Ahora finalPrice = precio de venta correcto (incluye IVA) con descuento aplicado
-                                        final finalPrice = _computeSaleUnitPrice(d, disc);
+                                        final disc =
+                                            await _bestDiscountFor(pdoc.id, d);
+                                        // finalPrice = precio FINAL con IVA (13%) aplicado a partir del precio sin IVA
+                                        final finalPrice =
+                                            _computeSaleUnitPrice(d, disc);
                                         _addLine(
                                           productId: pdoc.id,
                                           name: name,
                                           unitPrice: finalPrice,
                                           stock: stock,
-                                          taxable: (d['taxable'] ?? false) == true,
-                                          ivaPercent: _toDouble(d['ivaPercent'] ?? 13),
+                                          taxable:
+                                              (d['taxable'] ?? false) == true,
+                                          ivaPercent:
+                                              _toDouble(d['ivaPercent'] ?? 13),
                                           discountPct: disc,
                                         );
                                         searchCtrl.clear();
 
                                         if (disc > 0) {
-                                          _showSnack('Se aplicó oferta: ${disc.toStringAsFixed(0)}% sobre $name');
+                                          _showSnack(
+                                              'Se aplicó oferta: ${disc.toStringAsFixed(0)}% sobre $name');
                                         }
                                       },
                                 child: const Text('Agregar'),
@@ -689,9 +710,11 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
               return Column(children: [
                 if (!isNarrow)
                   Container(
-                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                    decoration:
-                        BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(6)),
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 6, horizontal: 8),
+                    decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(6)),
                     child: Row(children: const [
                       Expanded(child: Text('Producto')),
                       SizedBox(width: 100, child: Text('Cant.')),
@@ -714,12 +737,16 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                     child: _lines.isEmpty
                         ? const Padding(
                             padding: EdgeInsets.all(16.0),
-                            child: Center(child: Text('No hay productos agregados.')))
+                            child: Center(
+                                child:
+                                    Text('No hay productos agregados.')))
                         : ListView.builder(
                             shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
+                            physics:
+                                const NeverScrollableScrollPhysics(),
                             itemCount: _lines.length,
-                            itemBuilder: (context, i) => _lineTile(_lines[i], isNarrow),
+                            itemBuilder: (context, i) =>
+                                _lineTile(_lines[i], isNarrow),
                           ),
                   ),
                 ),
@@ -734,19 +761,29 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
               runSpacing: 8,
               children: [
                 ElevatedButton(
-                  onPressed: _lines.isEmpty && buyerCtrl.text.isEmpty && notesCtrl.text.isEmpty ? null : _clearAll,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                  onPressed: _lines.isEmpty &&
+                          buyerCtrl.text.isEmpty &&
+                          notesCtrl.text.isEmpty
+                      ? null
+                      : _clearAll,
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white),
                   child: const Text('L  •  Limpiar'),
                 ),
                 ElevatedButton(
                   onPressed: null, // reservado para "C"
-                  style:
-                      ElevatedButton.styleFrom(backgroundColor: Colors.black12, foregroundColor: Colors.black54),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.black12,
+                      foregroundColor: Colors.black54),
                   child: const Text('C  •  Próximamente'),
                 ),
                 ElevatedButton(
-                  onPressed: _lines.isEmpty ? null : () => _printCurrentInvoice(),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
+                  onPressed:
+                      _lines.isEmpty ? null : () => _printCurrentInvoice(),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white),
                   child: const Text('I  •  Imprimir PDF'),
                 ),
               ],
@@ -756,12 +793,14 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
 
             TextFormField(
               controller: buyerCtrl,
-              decoration: const InputDecoration(labelText: 'Cliente o comprador (opcional)'),
+              decoration: const InputDecoration(
+                  labelText: 'Cliente o comprador (opcional)'),
             ),
             const SizedBox(height: 8),
             TextFormField(
               controller: notesCtrl,
-              decoration: const InputDecoration(labelText: 'Notas adicionales'),
+              decoration:
+                  const InputDecoration(labelText: 'Notas adicionales'),
             ),
 
             if (_anyRequiresRecipe())
@@ -777,14 +816,16 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Hay productos de venta bajo receta en esta venta.',
+                      const Text(
+                          'Hay productos de venta bajo receta en esta venta.',
                           style: TextStyle(fontWeight: FontWeight.w600)),
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
                         activeColor: kGreen2,
                         title: const Text('Receta médica verificada'),
                         value: _recipeChecked,
-                        onChanged: (v) => setState(() => _recipeChecked = v),
+                        onChanged: (v) =>
+                            setState(() => _recipeChecked = v),
                       ),
                     ],
                   ),
@@ -806,14 +847,21 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                       Text('Subtotal (sin IVA): ${_fmt(_subtotalSinIVA)}'),
                       Text('IVA: ${_fmt(_ivaTotal)}'),
                       Text('Total: ${_fmt(_total)}',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                          style: const TextStyle(
+                              fontSize: 18, fontWeight: FontWeight.bold)),
                     ],
                   ),
                   ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: kGreen2, foregroundColor: Colors.white),
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: kGreen2,
+                        foregroundColor: Colors.white),
                     onPressed: _loading ? null : _save,
                     child: _loading
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : const Text('Registrar venta'),
                   ),
                 ],
@@ -836,7 +884,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         appBar: AppBar(
           backgroundColor: kGreen2,
           title: const Text('Generar venta (Egreso)'),
-          leading: Navigator.canPop(context) ? null : const SizedBox.shrink(),
+          leading:
+              Navigator.canPop(context) ? null : const SizedBox.shrink(),
         ),
         body: SafeArea(child: content),
       ),
@@ -849,7 +898,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       // Diseño horizontal (escritorio / tablet)
       return Card(
         margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         child: Padding(
           padding: const EdgeInsets.all(10),
           child: Row(
@@ -869,8 +919,11 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                   child: DropdownButton<int>(
                     isExpanded: true,
                     value: l.qty,
-                    items: List<int>.generate((l.stock > 50 ? 50 : (l.stock == 0 ? 1 : l.stock)), (x) => x + 1)
-                        .map((v) => DropdownMenuItem(value: v, child: Text('$v')))
+                    items: List<int>.generate(
+                            (l.stock > 50 ? 50 : (l.stock == 0 ? 1 : l.stock)),
+                            (x) => x + 1)
+                        .map((v) =>
+                            DropdownMenuItem(value: v, child: Text('$v')))
                         .toList(),
                     onChanged: (v) {
                       if (v == null) return;
@@ -880,9 +933,9 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                 ),
               ),
               const SizedBox(width: 8),
-              SizedBox(width: 100, child: Text(_fmt(l.unitPrice))),
+              SizedBox(width: 100, child: Text(_fmt(l.unitPrice))), // ya con IVA
               const SizedBox(width: 8),
-              SizedBox(width: 120, child: Text(_fmt(l.subtotal))),
+              SizedBox(width: 120, child: Text(_fmt(l.subtotal))), // ya con IVA
               IconButton(
                 tooltip: 'Quitar',
                 onPressed: () => _removeLine(_lines.indexOf(l)),
@@ -897,51 +950,64 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     // Diseño compacto (móvil)
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       child: Padding(
         padding: const EdgeInsets.all(12),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(
-            l.name,
-            maxLines: 3,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 6),
-          Row(
+        child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: Text('Stock: ${l.stock}  •  ${_fmt(l.unitPrice)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''}')),
-              IconButton(
-                tooltip: 'Quitar',
-                onPressed: () => _removeLine(_lines.indexOf(l)),
-                icon: const Icon(Icons.delete_outline),
+              Text(
+                l.name,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
               ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              SizedBox(
-                width: 80,
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<int>(
-                    isExpanded: true,
-                    value: l.qty,
-                    items: List<int>.generate((l.stock > 50 ? 50 : (l.stock == 0 ? 1 : l.stock)), (x) => x + 1)
-                        .map((v) => DropdownMenuItem(value: v, child: Text('$v')))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setState(() => l.qty = v);
-                    },
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                      child: Text(
+                          'Stock: ${l.stock}  •  ${_fmt(l.unitPrice)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''}')),
+                  IconButton(
+                    tooltip: 'Quitar',
+                    onPressed: () =>
+                        _removeLine(_lines.indexOf(l)),
+                    icon: const Icon(Icons.delete_outline),
                   ),
-                ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Expanded(child: Text('Subtotal: ${_fmt(l.subtotal)}', textAlign: TextAlign.right)),
-            ],
-          ),
-        ]),
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  SizedBox(
+                    width: 80,
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<int>(
+                        isExpanded: true,
+                        value: l.qty,
+                        items: List<int>.generate(
+                                (l.stock > 50
+                                    ? 50
+                                    : (l.stock == 0 ? 1 : l.stock)),
+                                (x) => x + 1)
+                            .map((v) => DropdownMenuItem(
+                                value: v, child: Text('$v')))
+                            .toList(),
+                        onChanged: (v) {
+                          if (v == null) return;
+                          setState(() => l.qty = v);
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: Text('Subtotal: ${_fmt(l.subtotal)}',
+                          textAlign: TextAlign.right)),
+                ],
+              ),
+            ]),
       ),
     );
   }
@@ -949,7 +1015,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   // ====== Detalles ======
   Future<void> _showDetailsDialog(Map<String, dynamic> d) async {
     final name = (d['name'] ?? 'Producto').toString();
-    final price = _toDouble(d['price']);
+    final priceNet = _toDouble(d['price']); // sin IVA
     final stock = _toInt(d['stock']);
     final requiresRx = (d['requiresPrescription'] ?? false) == true;
     final form = (d['pharmForm'] ?? '').toString();
@@ -970,16 +1036,20 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _kv('Forma/Vía', '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
+            _kv('Forma/Vía',
+                '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
             _kv('Concentración', strength.isEmpty ? '—' : strength),
             _kv('Presentación', pres.isEmpty ? '—' : pres),
             _kv('Stock', '$stock'),
-            _kv('Precio (final)', _fmt(price)),
+            _kv('Precio (sin IVA)', _fmt(priceNet)),
             _kv('IVA', taxable ? '${iva.toStringAsFixed(0)}%' : 'No grava'),
             if (expiry != null) _kv('Vencimiento', _fmtDate(expiry)),
-            if (inferredDisc > 0) _kv('Oferta', '${inferredDisc.toStringAsFixed(0)}%'),
-            if (expiry != null && expiry.difference(DateTime.now()).inDays <= 90)
-              _kv('Observación', 'Producto próximo a vencer — oferta aplicada'),
+            if (inferredDisc > 0)
+              _kv('Oferta', '${inferredDisc.toStringAsFixed(0)}%'),
+            if (expiry != null &&
+                expiry.difference(DateTime.now()).inDays <= 90)
+              _kv('Observación',
+                  'Producto próximo a vencer — oferta aplicada'),
             if (requiresRx)
               Padding(
                 padding: const EdgeInsets.only(top: 8.0),
@@ -987,14 +1057,18 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                   children: const [
                     Icon(Icons.warning_amber, color: Colors.red),
                     SizedBox(width: 6),
-                    Expanded(child: Text('Producto bajo receta médica', style: TextStyle(color: Colors.red))),
+                    Expanded(
+                        child: Text('Producto bajo receta médica',
+                            style: TextStyle(color: Colors.red))),
                   ],
                 ),
               ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cerrar')),
+          TextButton(
+              onPressed: () => Navigator.pop(c),
+              child: const Text('Cerrar')),
         ],
       ),
     );
@@ -1004,20 +1078,26 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         padding: const EdgeInsets.only(bottom: 6.0),
         child: Row(
           children: [
-            SizedBox(width: 140, child: Text(k, style: const TextStyle(fontWeight: FontWeight.w600))),
+            SizedBox(
+                width: 140,
+                child:
+                    Text(k, style: const TextStyle(fontWeight: FontWeight.w600))),
             Expanded(child: Text(v)),
           ],
         ),
       );
 
   Widget _pill(String t) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(color: Colors.green.shade300),
           borderRadius: BorderRadius.circular(999),
         ),
-        child: Text(t, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+        child: Text(t,
+            style: const TextStyle(
+                fontSize: 12, fontWeight: FontWeight.w600)),
       );
 }
 

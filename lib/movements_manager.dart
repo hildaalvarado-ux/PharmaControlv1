@@ -192,11 +192,6 @@ class _MovementsManagerState extends State<MovementsManager> {
 
       await movementDoc.reference.update({
         'deleted': false,
-        // Si quieres conservar el motivo, comenta estas líneas:
-        // 'deleteReason': null,
-        // 'deletedAt': null,
-        // 'deletedByUid': null,
-        // 'deletedByEmail': null,
       });
 
       _snack('Movimiento restaurado.');
@@ -266,6 +261,110 @@ class _MovementsManagerState extends State<MovementsManager> {
     }
   }
 
+  // ====== REPORTE / VISTA DE IVA RETENIDO ======
+
+  Future<void> _openIvaRetenidoDialog() async {
+    try {
+      setState(() => _busy = true);
+
+      final snap = await _buildQuery().get();
+      final now = DateTime.now();
+      final currentMonthStart = DateTime(now.year, now.month, 1);
+      final nextMonthStart =
+          (now.month == 12) ? DateTime(now.year + 1, 1, 1) : DateTime(now.year, now.month + 1, 1);
+
+      final pending = <Map<String, dynamic>>[];
+      final current = <Map<String, dynamic>>[];
+
+      for (final d in snap.docs) {
+        final m = d.data() as Map<String, dynamic>;
+
+        // ignorar eliminados
+        if (m['deleted'] == true) continue;
+
+        final type = (m['type'] ?? '').toString().toLowerCase();
+        if (type != 'egreso') continue;
+
+        final ivaRetenido = _toMoney(m['ivaRetenido'] ?? 0);
+        if (ivaRetenido <= 0) continue;
+
+        final ts = m['createdAt'];
+        if (ts is! Timestamp) continue;
+        final dt = ts.toDate();
+
+        final subtotal = _toMoney(m['subtotal'] ?? m['subtotalAmount'] ?? 0);
+        final iva = _toMoney(m['iva'] ?? m['ivaAmount'] ?? 0);
+        final total = _toMoney(m['totalAmount'] ?? m['total'] ?? 0);
+
+        final full = {
+          ...m,
+          'id': d.id,
+          'createdAtDateTime': dt,
+          '_subtotal': subtotal,
+          '_iva': iva,
+          '_ivaRetenido': ivaRetenido,
+          '_total': total,
+        };
+
+        if (dt.isBefore(currentMonthStart)) {
+          pending.add(full);
+        } else if (dt.isBefore(nextMonthStart)) {
+          current.add(full);
+        } else {
+          // por si acaso hay movimientos a futuro, los tratamos como mes actual
+          current.add(full);
+        }
+      }
+
+      if (pending.isEmpty && current.isEmpty) {
+        _snack('No hay egresos con IVA retenido en los filtros actuales.');
+        return;
+      }
+
+      await showDialog(
+        context: context,
+        builder: (ctx) => _IvaRetenidoDialog(
+          pendientes: pending,
+          mesActual: current,
+          onPrint: () => _printIvaRetenido([...pending, ...current]),
+        ),
+      );
+    } catch (e) {
+      _snack('Error al cargar IVA retenido: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _printIvaRetenido(List<Map<String, dynamic>> ivaMovs) async {
+    if (ivaMovs.isEmpty) {
+      _snack('No hay datos de IVA retenido para imprimir.');
+      return;
+    }
+
+    try {
+      setState(() => _busy = true);
+
+      final bytes = await MovementsPdf.build(
+        title: 'Reporte de IVA retenido',
+        filterLabel: 'Egresos con IVA retenido',
+        from: _from,
+        to: _to,
+        movements: ivaMovs,
+      );
+
+      final now = DateTime.now();
+      await pdf_out.outputPdf(
+        bytes,
+        'iva_retenido_${now.year}${now.month}${now.day}_${now.hour}${now.minute}.pdf',
+      );
+    } catch (e) {
+      _snack('Error al generar PDF de IVA: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   // ====== UI ======
   @override
   Widget build(BuildContext context) {
@@ -273,7 +372,7 @@ class _MovementsManagerState extends State<MovementsManager> {
       builder: (context, constraints) {
         final bool isMobile = constraints.maxWidth < 800;
 
-        // -------- TOOLBAR ESCRITORIO (igual que antes) --------
+        // -------- TOOLBAR ESCRITORIO --------
         final desktopToolbar = Row(
           children: [
             Text(
@@ -281,6 +380,12 @@ class _MovementsManagerState extends State<MovementsManager> {
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton.icon(
+              onPressed: _openIvaRetenidoDialog,
+              icon: const Icon(Icons.receipt_long),
+              label: const Text('IVA retenido'),
             ),
             const Spacer(),
             SegmentedButton<_View>(
@@ -345,7 +450,7 @@ class _MovementsManagerState extends State<MovementsManager> {
           ],
         );
 
-        // -------- TOOLBAR MÓVIL (adaptado, sin overflow) --------
+        // -------- TOOLBAR MÓVIL --------
         final mobileToolbar = Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -356,11 +461,16 @@ class _MovementsManagerState extends State<MovementsManager> {
                   ),
             ),
             const SizedBox(height: 8),
-            // Fila 1: filtro de tipo + fechas (scroll horizontal)
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
+                  OutlinedButton.icon(
+                    onPressed: _openIvaRetenidoDialog,
+                    icon: const Icon(Icons.receipt_long),
+                    label: const Text('IVA retenido'),
+                  ),
+                  const SizedBox(width: 8),
                   SegmentedButton<_View>(
                     segments: const [
                       ButtonSegment(
@@ -407,7 +517,6 @@ class _MovementsManagerState extends State<MovementsManager> {
               ),
             ),
             const SizedBox(height: 8),
-            // Fila 2: imprimir / nuevos movimientos (scroll horizontal)
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
@@ -614,8 +723,7 @@ class _MovementsManagerState extends State<MovementsManager> {
 
                   return ListTile(
                     dense: true,
-                    title:
-                        Text('${it['productName']} (SKU: ${it['sku']})'),
+                    title: Text('${it['productName']} (SKU: ${it['sku']})'),
                     subtitle: Text(
                       'Cant: $qty • '
                       'P. unidad: ${unitPrice.toStringAsFixed(2)} • '
@@ -703,8 +811,7 @@ class _MovementsManagerState extends State<MovementsManager> {
               ),
               DataCell(
                 Chip(
-                  label: Text(
-                      type == 'ingreso' ? 'Ingreso' : 'Egreso'),
+                  label: Text(type == 'ingreso' ? 'Ingreso' : 'Egreso'),
                 ),
               ),
               DataCell(
@@ -812,6 +919,263 @@ class _MovementsManagerState extends State<MovementsManager> {
                           ),
                   ],
                 ),
+              ),
+            ],
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// ====== DIÁLOGO DE IVA RETENIDO (solo UI / sin BD) ======
+
+class _IvaRetenidoDialog extends StatefulWidget {
+  final List<Map<String, dynamic>> pendientes;
+  final List<Map<String, dynamic>> mesActual;
+  final Future<void> Function()? onPrint;
+
+  const _IvaRetenidoDialog({
+    super.key,
+    required this.pendientes,
+    required this.mesActual,
+    this.onPrint,
+  });
+
+  @override
+  State<_IvaRetenidoDialog> createState() => _IvaRetenidoDialogState();
+}
+
+class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
+  final Map<String, bool> _pagado = {};
+  final Map<String, String> _comprobantes = {};
+
+  double _totalIvaPendiente() {
+    double total = 0;
+    for (final m in widget.pendientes) {
+      final id = (m['id'] ?? '').toString();
+      if (_pagado[id] == true) continue;
+      final ivaRet = (m['_ivaRetenido'] ?? 0.0) as double;
+      total += ivaRet;
+    }
+    return total;
+  }
+
+  double _totalIvaMesActual() {
+    double total = 0;
+    for (final m in widget.mesActual) {
+      final ivaRet = (m['_ivaRetenido'] ?? 0.0) as double;
+      total += ivaRet;
+    }
+    return total;
+  }
+
+  Future<void> _marcarComoPagado(Map<String, dynamic> mov) async {
+    final id = (mov['id'] ?? '').toString();
+    final ctrl = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Registrar pago de IVA'),
+        content: Form(
+          key: formKey,
+          child: TextFormField(
+            controller: ctrl,
+            decoration: const InputDecoration(
+              labelText: 'Número de comprobante',
+              hintText: 'Ej: 000123-ABC',
+            ),
+            validator: (v) {
+              if (v == null || v.trim().isEmpty) {
+                return 'El comprobante es obligatorio';
+              }
+              return null;
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (!formKey.currentState!.validate()) return;
+              Navigator.pop(ctx, true);
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true) {
+      setState(() {
+        _pagado[id] = true;
+        _comprobantes[id] = ctrl.text.trim();
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+
+    return AlertDialog(
+      title: const Text('IVA retenido'),
+      content: SizedBox(
+        width: 1000,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Mes actual: ${now.month.toString().padLeft(2, '0')}/${now.year}',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Aquí se muestran solo EGRESOS que tienen IVA retenido (13%) calculado al momento de la venta.',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Colors.grey[700]),
+              ),
+              const SizedBox(height: 16),
+
+              // -------- PENDIENTES --------
+              Text(
+                'Pendiente de pago (meses anteriores)',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              _buildTable(widget.pendientes, allowMarkPaid: true),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'Total IVA retenido pendiente: ${_totalIvaPendiente().toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // -------- MES ACTUAL --------
+              Text(
+                'Mes actual (en curso)',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              _buildTable(widget.mesActual, allowMarkPaid: false),
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'Total IVA retenido del mes actual: ${_totalIvaMesActual().toStringAsFixed(2)}',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'La opción de marcar como pagado para el mes actual estará disponible al cierre del mes.',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Colors.grey[700]),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cerrar'),
+        ),
+        if (widget.pendientes.isNotEmpty || widget.mesActual.isNotEmpty)
+          OutlinedButton.icon(
+            onPressed: widget.onPrint == null ? null : () => widget.onPrint!(),
+            icon: const Icon(Icons.print),
+            label: const Text('Imprimir'),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTable(List<Map<String, dynamic>> items,
+      {required bool allowMarkPaid}) {
+    if (items.isEmpty) {
+      return Text(
+        'No hay registros en esta sección.',
+        style: Theme.of(context).textTheme.bodySmall,
+      );
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: DataTable(
+        columnSpacing: 16,
+        columns: const [
+          DataColumn(label: Text('Fecha')),
+          DataColumn(label: Text('Usuario')),
+          DataColumn(label: Text('Cliente')),
+          DataColumn(label: Text('Subtotal')),
+          DataColumn(label: Text('IVA')),
+          DataColumn(label: Text('IVA retenido')),
+          DataColumn(label: Text('Total')),
+          DataColumn(label: Text('Estado')),
+          DataColumn(label: Text('Acciones')),
+        ],
+        rows: items.map((m) {
+          final id = (m['id'] ?? '').toString();
+          final dt = m['createdAtDateTime'] as DateTime;
+          final user = (m['createdByName'] ?? '—').toString();
+          final client = (m['counterpartyName'] ?? '—').toString();
+
+          final subtotal = (m['_subtotal'] ?? 0.0) as double;
+          final iva = (m['_iva'] ?? 0.0) as double;
+          final ivaRet = (m['_ivaRetenido'] ?? 0.0) as double;
+          final total = (m['_total'] ?? 0.0) as double;
+
+          final pagado = _pagado[id] == true;
+          final comp = _comprobantes[id];
+
+          return DataRow(
+            cells: [
+              DataCell(
+                Text(
+                  '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}',
+                ),
+              ),
+              DataCell(Text(user)),
+              DataCell(Text(client)),
+              DataCell(Text(subtotal.toStringAsFixed(2))),
+              DataCell(Text(iva.toStringAsFixed(2))),
+              DataCell(Text(ivaRet.toStringAsFixed(2))),
+              DataCell(Text(total.toStringAsFixed(2))),
+              DataCell(
+                pagado
+                    ? Text('Pagado\nComp: $comp')
+                    : const Text('Pendiente'),
+              ),
+              DataCell(
+                allowMarkPaid
+                    ? TextButton(
+                        onPressed: pagado ? null : () => _marcarComoPagado(m),
+                        child: Text(pagado ? 'Pagado' : 'Marcar como pagado'),
+                      )
+                    : const Text(
+                        'Solo al\nfinal del mes',
+                        textAlign: TextAlign.center,
+                      ),
               ),
             ],
           );
