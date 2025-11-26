@@ -52,6 +52,11 @@ class _AdminInventoryPageState extends State<AdminInventoryPage> {
     return expiry.isBefore(limit);
   }
 
+  // ===== Stock bajo =====
+
+  /// Cambia aquí el umbral si quieres otro valor.
+  bool _isLowStock(num stock) => stock < 15;
+
   // ===== UI helpers =====
 
   Widget _chip(String txt, {Color? color}) {
@@ -119,7 +124,8 @@ class _AdminInventoryPageState extends State<AdminInventoryPage> {
                         "Vence: ${_ddmmyyyy(expiry)}",
                         style: TextStyle(
                           color: near ? Colors.red : Colors.black87,
-                          fontWeight: near ? FontWeight.bold : FontWeight.normal,
+                          fontWeight:
+                              near ? FontWeight.bold : FontWeight.normal,
                         ),
                       )
                     : const Text("Sin fecha de vencimiento"),
@@ -371,6 +377,7 @@ class _AdminInventoryPageState extends State<AdminInventoryPage> {
         final stock = _toNum(data['stock']);
         final purchasePrice = _toNum(data['purchasePrice']);
         final value = stock * purchasePrice;
+        final isLow = _isLowStock(stock);
 
         return Card(
           elevation: 2,
@@ -395,7 +402,21 @@ class _AdminInventoryPageState extends State<AdminInventoryPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Categoría: ${data['category'] ?? '—'}'),
-                Text('Stock actual: $stock'),
+                Row(
+                  children: [
+                    Text(
+                      'Stock actual: $stock',
+                      style: TextStyle(
+                        color: isLow ? Colors.red : null,
+                        fontWeight: isLow ? FontWeight.bold : null,
+                      ),
+                    ),
+                    if (isLow) ...[
+                      const SizedBox(width: 6),
+                      _chip('Stock bajo', color: Colors.red),
+                    ],
+                  ],
+                ),
                 Text('Costo unitario: ${_fmt(purchasePrice)}'),
                 Text('Valor en existencia: ${_fmt(value)}'),
                 Text(
@@ -451,14 +472,28 @@ class _AdminInventoryPageState extends State<AdminInventoryPage> {
             if (strength.isNotEmpty) strength,
           ].join(' • ');
 
+          final isLow = _isLowStock(stock);
+
           return DataRow(
+            color: MaterialStateProperty.resolveWith<Color?>(
+              (states) =>
+                  isLow ? Colors.red.withOpacity(0.08) : null, // fila tenue roja
+            ),
             cells: [
               DataCell(Text(data['name'] ?? '—')),
               DataCell(Text(data['sku'] ?? '—')),
               DataCell(Text(data['category'] ?? '—')),
               DataCell(Text(
                   presentacionCompleta.isEmpty ? '—' : presentacionCompleta)),
-              DataCell(Text(stock.toString())),
+              DataCell(
+                Text(
+                  stock.toString(),
+                  style: TextStyle(
+                    color: isLow ? Colors.red : null,
+                    fontWeight: isLow ? FontWeight.bold : null,
+                  ),
+                ),
+              ),
               DataCell(Text(_fmt(purchasePrice))),
               DataCell(Text(_fmt(value))),
               DataCell(Text(_fmt(data['price']))),

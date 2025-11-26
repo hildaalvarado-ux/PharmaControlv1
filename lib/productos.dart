@@ -94,11 +94,13 @@ class _AdminProductManagerState extends State<AdminProductManager> {
         content: Text(message),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Cancelar')),
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Cancelar'),
+          ),
           TextButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Sí')),
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Sí'),
+          ),
         ],
       ),
     );
@@ -162,7 +164,8 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       'priceIsPerUnit': (data['priceIsPerUnit'] ?? true) == true,
       'stock': _toNum(data['stock']),
       'providerId': data['providerId'],
-      'requiresPrescription': (data['requiresPrescription'] ?? false) == true,
+      'requiresPrescription':
+          (data['requiresPrescription'] ?? false) == true,
       'pharmForm': nonNullStr(data['pharmForm']),
       'route': nonNullStr(data['route']),
       'strength': nonNullStr(data['strength']),
@@ -274,7 +277,10 @@ class _AdminProductManagerState extends State<AdminProductManager> {
             'Gestión de productos',
             textAlign: TextAlign.center,
             style: TextStyle(
-                fontSize: 20, fontWeight: FontWeight.bold, color: kGreen1),
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: kGreen1,
+            ),
           ),
         ),
         const SizedBox(height: 12),
@@ -289,10 +295,13 @@ class _AdminProductManagerState extends State<AdminProductManager> {
               backgroundColor: kGreen2,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              textStyle:
-                  const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              textStyle: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10)),
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           ),
         ),
@@ -310,210 +319,234 @@ class _AdminProductManagerState extends State<AdminProductManager> {
             }
             final docs = snap.data!.docs;
 
-            return LayoutBuilder(builder: (context, constraints) {
-              final isMobile = constraints.maxWidth < 900;
+            return LayoutBuilder(
+              builder: (context, constraints) {
+                final isMobile = constraints.maxWidth < 900;
 
-              if (isMobile) {
-                // ---- Móvil: Cards
-                return ListView.separated(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: docs.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (ctx, i) {
-                    final d = docs[i];
-                    final data = d.data() as Map<String, dynamic>;
-                    final taxable = (data['taxable'] ?? false) == true;
-                    final requiresRx =
-                        (data['requiresPrescription'] ?? false) == true;
-
-                    return Card(
-                      elevation: 2,
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      child: ExpansionTile(
-                        leading: CircleAvatar(
-                          backgroundColor: kGreen3,
-                          child: Text((data['name'] ?? 'P')
-                              .toString()
-                              .substring(0, 1)
-                              .toUpperCase()),
-                        ),
-                        title: Wrap(
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          spacing: 6,
-                          children: [
-                            Text('${data['name'] ?? '—'}  '
-                                '(${data['sku'] ?? '—'})'),
-                            if (taxable) _chip('IVA', color: Colors.orange),
-                            if (requiresRx)
-                              _chip('Bajo receta', color: Colors.redAccent),
-                          ],
-                        ),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Categoría: ${data['category'] ?? '—'}'),
-                            Text(
-                                'Precio (venta): ${_fmt(data['price'])} • Stock: ${data['stock'] ?? 0}'),
-                            if ((data['pharmForm'] ?? '')
-                                    .toString()
-                                    .isNotEmpty ||
-                                (data['route'] ?? '').toString().isNotEmpty)
-                              Text(
-                                  'Forma/Vía: ${(data['pharmForm'] ?? '—')} / ${(data['route'] ?? '—')}'),
-                            if ((data['strength'] ?? '')
-                                .toString()
-                                .isNotEmpty)
-                              Text('Concentración: ${data['strength']}'),
-                            if ((data['presentation'] ?? '')
-                                .toString()
-                                .isNotEmpty)
-                              Text('Presentación: ${data['presentation']}'),
-                            if ((data['description'] ?? '')
-                                .toString()
-                                .isNotEmpty)
-                              Text('Descripción: ${data['description']}'),
-                          ],
-                        ),
-                        children: [
-                          _buildBatchesList(d.id),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.end,
-                            children: [
-                              TextButton.icon(
-                                onPressed: () => _showEditProductDialog(d),
-                                icon: const Icon(Icons.edit),
-                                label: const Text("Editar"),
-                              ),
-                              TextButton.icon(
-                                onPressed: () => _tryDeleteProduct(d),
-                                icon: const Icon(Icons.delete),
-                                label: const Text("Eliminar"),
-                              ),
-                            ],
-                          )
-                        ],
-                        trailing: const Icon(Icons.keyboard_arrow_down),
-                      ),
-                    );
-                  },
-                );
-              } else {
-                // ---- Escritorio: DataTable
-                return SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: const [
-                      DataColumn(label: Text('Nombre')),
-                      DataColumn(label: Text('SKU')),
-                      DataColumn(label: Text('Categoría')),
-                      DataColumn(label: Text('Descripción')),
-                      DataColumn(label: Text('Precio (venta)')),
-                      DataColumn(label: Text('IVA')),
-                      DataColumn(label: Text('Receta')),
-                      DataColumn(label: Text('Stock')),
-                      DataColumn(label: Text('Forma/Vía')),
-                      DataColumn(label: Text('Conc.')),
-                      DataColumn(label: Text('Presentación')),
-                      DataColumn(label: Text('Lotes')),
-                      DataColumn(label: Text('Proveedor')),
-                      DataColumn(label: Text('Acciones')),
-                    ],
-                    rows: docs.map((d) {
+                if (isMobile) {
+                  // ---- Móvil: Cards
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: docs.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (ctx, i) {
+                      final d = docs[i];
                       final data = d.data() as Map<String, dynamic>;
                       final taxable = (data['taxable'] ?? false) == true;
                       final requiresRx =
                           (data['requiresPrescription'] ?? false) == true;
-                      final providerName = _providers[data['providerId']] ??
-                          (data['providerId'] ?? '—');
 
-                      return DataRow(
-                        cells: [
-                          DataCell(Text(data['name'] ?? '—')),
-                          DataCell(Text(data['sku'] ?? '—')),
-                          DataCell(Text(data['category'] ?? '—')),
-                          DataCell(
-                              Text((data['description'] ?? '—').toString())),
-                          DataCell(Text(_fmt(data['price']))),
-                          DataCell(
-                            Icon(
-                              taxable ? Icons.check_circle : Icons.cancel,
-                              color:
-                                  taxable ? Colors.orange : Colors.grey,
+                      return Card(
+                        elevation: 2,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: ExpansionTile(
+                          leading: CircleAvatar(
+                            backgroundColor: kGreen3,
+                            child: Text(
+                              (data['name'] ?? 'P')
+                                  .toString()
+                                  .substring(0, 1)
+                                  .toUpperCase(),
                             ),
                           ),
-                          DataCell(
-                            Icon(
-                              requiresRx
-                                  ? Icons.medical_services
-                                  : Icons.remove,
-                              color: requiresRx
-                                  ? Colors.redAccent
-                                  : Colors.grey,
-                            ),
+                          title: Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            spacing: 6,
+                            children: [
+                              Text(
+                                '${data['name'] ?? '—'}  '
+                                '(${data['sku'] ?? '—'})',
+                              ),
+                              if (taxable) _chip('IVA', color: Colors.orange),
+                              if (requiresRx)
+                                _chip('Bajo receta',
+                                    color: Colors.redAccent),
+                            ],
                           ),
-                          DataCell(
-                              Text((data['stock'] ?? 0).toString())),
-                          DataCell(Text(
-                              '${data['pharmForm'] ?? '—'} / ${data['route'] ?? '—'}')),
-                          DataCell(
-                              Text(data['strength']?.toString() ?? '—')),
-                          DataCell(Text(
-                              data['presentation']?.toString() ?? '—')),
-                          DataCell(
-                            IconButton(
-                              icon: const Icon(
-                                  Icons.inventory_2_outlined),
-                              tooltip: 'Ver Lotes',
-                              onPressed: () {
-                                showDialog(
-                                  context: context,
-                                  builder: (c) => AlertDialog(
-                                    title: Text(
-                                        "Lotes para ${data['name'] ?? ''}"),
-                                    content: SizedBox(
-                                      width: 400,
-                                      child: _buildBatchesList(d.id),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(c),
-                                        child: const Text("Cerrar"),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                          DataCell(Text(providerName.toString())),
-                          DataCell(
-                            Row(
-                              children: [
-                                IconButton(
-                                  onPressed: () async =>
-                                      _showEditProductDialog(d),
-                                  icon: const Icon(Icons.edit,
-                                      color: Colors.black54),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Categoría: ${data['category'] ?? '—'}'),
+                              Text(
+                                'Precio (venta): ${_fmt(data['price'])} • Stock: ${data['stock'] ?? 0}',
+                              ),
+                              if ((data['pharmForm'] ?? '')
+                                      .toString()
+                                      .isNotEmpty ||
+                                  (data['route'] ?? '').toString().isNotEmpty)
+                                Text(
+                                  'Forma/Vía: ${(data['pharmForm'] ?? '—')} / ${(data['route'] ?? '—')}',
                                 ),
-                                IconButton(
-                                  onPressed: () async =>
-                                      _tryDeleteProduct(d),
-                                  icon: const Icon(Icons.delete,
-                                      color: Colors.redAccent),
+                              if ((data['strength'] ?? '')
+                                  .toString()
+                                  .isNotEmpty)
+                                Text('Concentración: ${data['strength']}'),
+                              if ((data['presentation'] ?? '')
+                                  .toString()
+                                  .isNotEmpty)
+                                Text('Presentación: ${data['presentation']}'),
+                              if ((data['description'] ?? '')
+                                  .toString()
+                                  .isNotEmpty)
+                                Text('Descripción: ${data['description']}'),
+                            ],
+                          ),
+                          children: [
+                            _buildBatchesList(d.id),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                TextButton.icon(
+                                  onPressed: () => _showEditProductDialog(d),
+                                  icon: const Icon(Icons.edit),
+                                  label: const Text("Editar"),
+                                ),
+                                TextButton.icon(
+                                  onPressed: () => _tryDeleteProduct(d),
+                                  icon: const Icon(Icons.delete),
+                                  label: const Text("Eliminar"),
                                 ),
                               ],
                             ),
-                          ),
-                        ],
+                          ],
+                          trailing: const Icon(Icons.keyboard_arrow_down),
+                        ),
                       );
-                    }).toList(),
-                  ),
-                );
-              }
-            });
+                    },
+                  );
+                } else {
+                  // ---- Escritorio: DataTable
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTable(
+                      columns: const [
+                        DataColumn(label: Text('Nombre')),
+                        DataColumn(label: Text('SKU')),
+                        DataColumn(label: Text('Categoría')),
+                        DataColumn(label: Text('Descripción')),
+                        DataColumn(label: Text('Precio (venta)')),
+                        DataColumn(label: Text('IVA')),
+                        DataColumn(label: Text('Receta')),
+                        DataColumn(label: Text('Stock')),
+                        DataColumn(label: Text('Forma/Vía')),
+                        DataColumn(label: Text('Conc.')),
+                        DataColumn(label: Text('Presentación')),
+                        DataColumn(label: Text('Lotes')),
+                        DataColumn(label: Text('Proveedor')),
+                        DataColumn(label: Text('Acciones')),
+                      ],
+                      rows: docs.map((d) {
+                        final data = d.data() as Map<String, dynamic>;
+                        final taxable = (data['taxable'] ?? false) == true;
+                        final requiresRx =
+                            (data['requiresPrescription'] ?? false) == true;
+                        final providerName = _providers[data['providerId']] ??
+                            (data['providerId'] ?? '—');
+
+                        return DataRow(
+                          cells: [
+                            DataCell(Text(data['name'] ?? '—')),
+                            DataCell(Text(data['sku'] ?? '—')),
+                            DataCell(Text(data['category'] ?? '—')),
+                            DataCell(
+                              Text(
+                                (data['description'] ?? '—').toString(),
+                              ),
+                            ),
+                            DataCell(Text(_fmt(data['price']))),
+                            DataCell(
+                              Icon(
+                                taxable ? Icons.check_circle : Icons.cancel,
+                                color: taxable ? Colors.orange : Colors.grey,
+                              ),
+                            ),
+                            DataCell(
+                              Icon(
+                                requiresRx
+                                    ? Icons.medical_services
+                                    : Icons.remove,
+                                color: requiresRx
+                                    ? Colors.redAccent
+                                    : Colors.grey,
+                              ),
+                            ),
+                            DataCell(
+                              Text((data['stock'] ?? 0).toString()),
+                            ),
+                            DataCell(
+                              Text(
+                                '${data['pharmForm'] ?? '—'} / ${data['route'] ?? '—'}',
+                              ),
+                            ),
+                            DataCell(
+                              Text(data['strength']?.toString() ?? '—'),
+                            ),
+                            DataCell(
+                              Text(data['presentation']?.toString() ?? '—'),
+                            ),
+                            DataCell(
+                              IconButton(
+                                icon: const Icon(
+                                  Icons.inventory_2_outlined,
+                                ),
+                                tooltip: 'Ver Lotes',
+                                onPressed: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (c) => AlertDialog(
+                                      title: Text(
+                                        "Lotes para ${data['name'] ?? ''}",
+                                      ),
+                                      content: SizedBox(
+                                        width: 400,
+                                        child: _buildBatchesList(d.id),
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () =>
+                                              Navigator.pop(c),
+                                          child: const Text("Cerrar"),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ),
+                            DataCell(Text(providerName.toString())),
+                            DataCell(
+                              Row(
+                                children: [
+                                  IconButton(
+                                    onPressed: () async =>
+                                        _showEditProductDialog(d),
+                                    icon: const Icon(
+                                      Icons.edit,
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    onPressed: () async =>
+                                        _tryDeleteProduct(d),
+                                    icon: const Icon(
+                                      Icons.delete,
+                                      color: Colors.redAccent,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      }).toList(),
+                    ),
+                  );
+                }
+              },
+            );
           },
         ),
 
@@ -542,8 +575,10 @@ class _AdminProductManagerState extends State<AdminProductManager> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color ?? Colors.black54),
       ),
-      child: Text(txt,
-          style: TextStyle(fontSize: 12, color: color ?? Colors.black54)),
+      child: Text(
+        txt,
+        style: TextStyle(fontSize: 12, color: color ?? Colors.black54),
+      ),
     );
   }
 
@@ -608,7 +643,9 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     final data = doc.data() as Map<String, dynamic>;
     final name = (data['name'] ?? '').toString();
     final ok = await _showConfirmation(
-        'Eliminar', '¿Eliminar el producto "$name"?');
+      'Eliminar',
+      '¿Eliminar el producto "$name"?',
+    );
     if (ok != true) return;
     if (!mounted) return;
     setState(() => _loadingAction = true);
@@ -623,7 +660,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
   }
 
   // ====== Product Form (Create/Edit) en DIALOG personalizado ======
-
   Future<void> _showProductFormDialog({
     required String title,
     required Map<String, dynamic> initial,
@@ -665,17 +701,20 @@ class _AdminProductManagerState extends State<AdminProductManager> {
         (initial['providerId'] ?? '').toString().isNotEmpty
             ? initial['providerId']?.toString()
             : null;
+
     bool taxable = (initial['taxable'] ?? false) == true;
-    bool priceIsPerUnit = (initial['priceIsPerUnit'] ?? true) == true;
     bool requiresRx =
         (initial['requiresPrescription'] ?? false) == true;
+    bool priceIsPerUnit = (initial['priceIsPerUnit'] ?? true) == true;
 
     String pharmForm = (initial['pharmForm'] ?? '').toString();
     String route = (initial['route'] ?? '').toString();
 
     bool autoPrice = (initial['autoPrice'] ?? true);
-    if ((initial['price'] == null ||
-        initial['price'].toString().isEmpty)) autoPrice = true;
+    if (initial['price'] == null ||
+        initial['price'].toString().isEmpty) {
+      autoPrice = true;
+    }
 
     const pharmOptions = <String>[
       'Tableta',
@@ -703,7 +742,6 @@ class _AdminProductManagerState extends State<AdminProductManager> {
       'Inhalatoria',
     ];
 
-    // Normalizar por si vienen valores raros
     if (category != null && !_categories.contains(category)) {
       category = null;
     }
@@ -735,519 +773,444 @@ class _AdminProductManagerState extends State<AdminProductManager> {
     }
 
     if (autoPrice) recalcFromPurchaseAndMargin();
-    if (!autoPrice && priceCtrl.text.isNotEmpty) recalcFromPrice();
+    if (!autoPrice && priceCtrl.text.isNotEmpty) {
+      recalcFromPrice();
+    }
 
     await showDialog(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) {
-        return Dialog(
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-          child: LayoutBuilder(
-            builder: (ctx, constraints) {
-              final screenSize = MediaQuery.of(ctx).size;
-              final maxH = screenSize.height * 0.9;
-              final maxW = screenSize.width * 0.95;
-
-              const horizontalPadding = 16.0;
-              final isSmall = maxW < 500;
-
-              // En pantallas pequeñas los campos usan todo el ancho
-              final double fieldW =
-                  isSmall ? maxW - horizontalPadding * 2 : 260;
-              final double smallFieldW =
-                  isSmall ? maxW - horizontalPadding * 2 : 220;
-
-              // 🔹 Ancho total disponible dentro del diálogo
-              final double fullWidth = maxW - horizontalPadding * 2;
-
-              Widget labeled(Widget child) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6.0),
-                    child: child,
-                  );
-
-              final formFields = Wrap(
-                spacing: 12,
-                runSpacing: 4,
-                children: [
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: nameCtrl,
-                        decoration:
-                            const InputDecoration(labelText: 'Nombre *'),
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty)
-                                ? 'Requerido'
-                                : null,
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: smallFieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: skuCtrl,
-                        decoration:
-                            const InputDecoration(labelText: 'SKU *'),
-                        validator: (v) =>
-                            (v == null || v.trim().isEmpty)
-                                ? 'Requerido'
-                                : null,
-                      ),
-                    ),
-                  ),
-
-                  // CATEGORÍA: dropdown + botón (+) al lado, usando todo el ancho
-                  SizedBox(
-                    width: fullWidth,
-                    child: labeled(
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: category,
-                              decoration: const InputDecoration(
-                                labelText: 'Categoría *',
-                              ),
-                              items: _categories
-                                  .map(
-                                    (e) => DropdownMenuItem(
-                                      value: e,
-                                      child: Text(
-                                        e,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-                              onChanged: (v) => category = v,
-                              validator: (v) =>
-                                  (v == null || v.trim().isEmpty)
-                                      ? 'Requerido'
-                                      : null,
-                            ),
+        return StatefulBuilder(
+          builder: (ctx, setStateSB) {
+            return Dialog(
+              insetPadding:
+                  const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(ctx).size.height * 0.9,
+                  maxWidth: MediaQuery.of(ctx).size.width * 0.95,
+                ),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
                           ),
-                          const SizedBox(width: 8),
-                          IconButton(
-                            tooltip: 'Agregar categoría',
-                            onPressed: () async {
-                              try {
+                        ),
+                        const SizedBox(height: 12),
+
+                        TextFormField(
+                          controller: nameCtrl,
+                          decoration:
+                              const InputDecoration(labelText: 'Nombre *'),
+                          validator: (v) =>
+                              (v == null || v.trim().isEmpty)
+                                  ? 'Requerido'
+                                  : null,
+                        ),
+                        const SizedBox(height: 8),
+
+                        TextFormField(
+                          controller: skuCtrl,
+                          decoration:
+                              const InputDecoration(labelText: 'SKU *'),
+                          validator: (v) =>
+                              (v == null || v.trim().isEmpty)
+                                  ? 'Requerido'
+                                  : null,
+                        ),
+                        const SizedBox(height: 8),
+
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DropdownButtonFormField<String>(
+                                value: category,
+                                decoration: const InputDecoration(
+                                  labelText: 'Categoría *',
+                                ),
+                                items: _categories
+                                    .map(
+                                      (e) => DropdownMenuItem(
+                                        value: e,
+                                        child: Text(
+                                          e,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: (v) {
+                                  setStateSB(() {
+                                    category = v;
+                                  });
+                                },
+                                validator: (v) =>
+                                    (v == null || v.trim().isEmpty)
+                                        ? 'Requerido'
+                                        : null,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Agregar categoría',
+                              onPressed: () async {
                                 final res =
                                     await _showAddCategoryDialog(dialogContext);
                                 if (!mounted) return;
                                 if (res != null) {
-                                  setState(() {});
-                                  category = res;
+                                  setStateSB(() {
+                                    category = res;
+                                  });
                                 }
-                              } catch (e) {
-                                _showSnack(
-                                    'No se pudo agregar la categoría: $e');
-                              }
-                            },
-                            icon: const Icon(Icons.add),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
+                              },
+                              icon: const Icon(Icons.add),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
 
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: descCtrl,
-                        decoration:
-                            const InputDecoration(labelText: 'Descripción'),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      DropdownButtonFormField<String>(
-                        value: providerId,
-                        decoration: const InputDecoration(
-                            labelText: 'Proveedor'),
-                        items: _providers.entries
-                            .map(
-                              (e) => DropdownMenuItem(
-                                value: e.key,
-                                child: Text(
-                                  e.value,
-                                  overflow: TextOverflow.ellipsis,
+                        TextFormField(
+                          controller: descCtrl,
+                          decoration:
+                              const InputDecoration(labelText: 'Descripción'),
+                          maxLines: 2,
+                        ),
+                        const SizedBox(height: 8),
+
+                        DropdownButtonFormField<String>(
+                          value: providerId,
+                          decoration:
+                              const InputDecoration(labelText: 'Proveedor'),
+                          items: _providers.entries
+                              .map(
+                                (e) => DropdownMenuItem(
+                                  value: e.key,
+                                  child: Text(
+                                    e.value,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) => providerId = v,
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: purchasePriceCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                            labelText: 'Precio de COMPRA (sin IVA) *'),
-                        validator: (v) =>
-                            (_toNum(v) <= 0) ? 'Monto inválido' : null,
-                        onChanged: (_) {
-                          if (autoPrice) {
-                            recalcFromPurchaseAndMargin();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: smallFieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: marginCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                            labelText: 'Margen % (por defecto 10)'),
-                        onChanged: (_) {
-                          if (autoPrice) {
-                            recalcFromPurchaseAndMargin();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      SwitchListTile(
-                        title: const Text('Producto grava IVA'),
-                        value: taxable,
-                        onChanged: (v) {
-                          taxable = v;
-                          if (autoPrice) {
-                            recalcFromPurchaseAndMargin();
-                          } else {
-                            recalcFromPrice();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: smallFieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: ivaCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration:
-                            const InputDecoration(labelText: 'IVA % (13)'),
-                        onChanged: (_) {
-                          if (autoPrice) {
-                            recalcFromPurchaseAndMargin();
-                          } else {
-                            recalcFromPrice();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      SwitchListTile(
-                        title: const Text(
-                            'Calcular precio automáticamente'),
-                        subtitle: const Text(
-                            'Compra + margen (+ IVA si aplica)'),
-                        value: autoPrice,
-                        onChanged: (v) {
-                          autoPrice = v;
-                          if (v) {
-                            recalcFromPurchaseAndMargin();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: saleNetCtrl,
-                        enabled: false,
-                        decoration: const InputDecoration(
-                            labelText:
-                                'Precio de VENTA SIN IVA (calc.)'),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: priceCtrl,
-                        keyboardType: TextInputType.number,
-                        enabled: !autoPrice,
-                        decoration: InputDecoration(
-                          labelText: taxable
-                              ? 'Precio de VENTA (CON IVA)'
-                              : 'Precio de VENTA',
-                          helperText: autoPrice
-                              ? 'Calculado automáticamente'
-                              : 'Editable',
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            setStateSB(() {
+                              providerId = v;
+                            });
+                          },
                         ),
-                        onChanged: (_) {
-                          if (!autoPrice) {
-                            recalcFromPrice();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: smallFieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: stockCtrl,
-                        enabled: false,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                            labelText: 'Stock (Calculado)'),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      SwitchListTile(
-                        title: const Text('Precio es por unidad'),
-                        value: priceIsPerUnit,
-                        onChanged: (v) => priceIsPerUnit = v,
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      SwitchListTile(
-                        title: const Text('Producto bajo receta médica'),
-                        value: requiresRx,
-                        onChanged: (v) => requiresRx = v,
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      DropdownButtonFormField<String>(
-                        value: pharmForm.isNotEmpty ? pharmForm : null,
-                        decoration: const InputDecoration(
-                          labelText: 'Forma farmacéutica',
-                          helperText:
-                              'Ej: Tableta, Cápsula, Jarabe…',
-                        ),
-                        items: pharmOptions
-                            .map(
-                              (e) => DropdownMenuItem(
-                                value: e,
-                                child: Text(e),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) => pharmForm = (v ?? ''),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      DropdownButtonFormField<String>(
-                        value: route.isNotEmpty ? route : null,
-                        decoration: const InputDecoration(
-                          labelText: 'Vía de administración',
-                          helperText:
-                              'Ej: Oral, Tópica, Oftálmica…',
-                        ),
-                        items: routeOptions
-                            .map(
-                              (e) => DropdownMenuItem(
-                                value: e,
-                                child: Text(e),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) => route = (v ?? ''),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: strengthCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Concentración',
-                          helperText:
-                              'Ej: 500 mg • 5 mg/5 mL',
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: fieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: presentationCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Presentación',
-                          helperText:
-                              'Ej: Caja x10 • Frasco 120 mL',
-                        ),
-                      ),
-                    ),
-                  ),
-                  SizedBox(
-                    width: smallFieldW,
-                    child: labeled(
-                      TextFormField(
-                        controller: unitsPerPackCtrl,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                            labelText: 'Unidades por empaque'),
-                      ),
-                    ),
-                  ),
-                ],
-              );
+                        const SizedBox(height: 12),
 
-              final primaryLabel = title.toLowerCase().contains('editar')
-                  ? 'Actualizar'
-                  : 'Agregar';
-
-              Future<void> handleSave() async {
-                if (!formKey.currentState!.validate()) return;
-
-                final payload = <String, dynamic>{
-                  'name': nameCtrl.text.trim(),
-                  'sku': skuCtrl.text.trim(),
-                  'category': (category ?? '').trim(),
-                  'description': descCtrl.text.trim(),
-                  'purchasePrice': _toNum(purchasePriceCtrl.text),
-                  'marginPercent': _toNum(
-                      marginCtrl.text.isEmpty ? '10' : marginCtrl.text),
-                  'taxable': taxable,
-                  'ivaPercent':
-                      _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text),
-                  'salePriceNet': _toNum(saleNetCtrl.text),
-                  'price': _toNum(priceCtrl.text),
-                  'priceIsPerUnit': priceIsPerUnit,
-                  'stock': _toNum(stockCtrl.text),
-                  'providerId': providerId,
-                  'requiresPrescription': requiresRx,
-                  'pharmForm': pharmForm.trim(),
-                  'route': route.trim(),
-                  'strength': strengthCtrl.text.trim(),
-                  'presentation': presentationCtrl.text.trim(),
-                  'unitsPerPack': _toNum(
-                      unitsPerPackCtrl.text.isEmpty
-                          ? '1'
-                          : unitsPerPackCtrl.text),
-                };
-
-                if (autoPrice) {
-                  final purchase =
-                      _toNum(purchasePriceCtrl.text).toDouble();
-                  final margin =
-                      _toNum(marginCtrl.text.isEmpty ? '10' : marginCtrl.text)
-                          .toDouble();
-                  final iva =
-                      _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text)
-                          .toDouble();
-                  final net = purchase * (1 + (margin / 100));
-                  final gross =
-                      taxable ? net * (1 + (iva / 100)) : net;
-                  payload['salePriceNet'] = net;
-                  payload['price'] = gross;
-                } else {
-                  final gross = _toNum(priceCtrl.text).toDouble();
-                  final iva =
-                      _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text)
-                          .toDouble();
-                  final net = taxable ? (gross / (1 + (iva / 100))) : gross;
-                  payload['salePriceNet'] = net;
-                }
-
-                Navigator.of(dialogContext).pop();
-                await onSubmit(payload);
-              }
-
-              return ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxHeight: maxH,
-                  maxWidth: maxW,
-                ),
-                child: SingleChildScrollView(
-                  child: Padding(
-                    padding:
-                        const EdgeInsets.all(horizontalPadding),
-                    child: Form(
-                      key: formKey,
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            title,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                            ),
+                        TextFormField(
+                          controller: purchasePriceCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Precio de COMPRA (sin IVA) *',
                           ),
-                          const SizedBox(height: 12),
-                          formFields,
-                          const SizedBox(height: 16),
-                          ElevatedButton.icon(
-                            icon: const Icon(Icons.save),
-                            label: Text(primaryLabel),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: kGreen2,
-                              foregroundColor: Colors.white,
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 14),
-                              textStyle: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
+                          validator: (v) =>
+                              (_toNum(v) <= 0) ? 'Monto inválido' : null,
+                          onChanged: (_) {
+                            if (autoPrice) recalcFromPurchaseAndMargin();
+                          },
+                        ),
+                        const SizedBox(height: 8),
+
+                        TextFormField(
+                          controller: marginCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Margen % (por defecto 10)',
+                          ),
+                          onChanged: (_) {
+                            if (autoPrice) recalcFromPurchaseAndMargin();
+                          },
+                        ),
+                        const SizedBox(height: 8),
+
+                        SwitchListTile(
+                          title: const Text('Producto grava IVA'),
+                          value: taxable,
+                          onChanged: (v) {
+                            setStateSB(() {
+                              taxable = v;
+                              if (autoPrice) {
+                                recalcFromPurchaseAndMargin();
+                              } else {
+                                recalcFromPrice();
+                              }
+                            });
+                          },
+                        ),
+
+                        TextFormField(
+                          controller: ivaCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration:
+                              const InputDecoration(labelText: 'IVA % (13)'),
+                          onChanged: (_) {
+                            if (autoPrice) {
+                              recalcFromPurchaseAndMargin();
+                            } else {
+                              recalcFromPrice();
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 8),
+
+                        SwitchListTile(
+                          title: const Text(
+                            'Calcular precio automáticamente',
+                          ),
+                          subtitle: const Text(
+                            'Compra + margen (+ IVA si aplica)',
+                          ),
+                          value: autoPrice,
+                          onChanged: (v) {
+                            setStateSB(() {
+                              autoPrice = v;
+                              if (v) recalcFromPurchaseAndMargin();
+                            });
+                          },
+                        ),
+
+                        TextFormField(
+                          controller: saleNetCtrl,
+                          enabled: false,
+                          decoration: const InputDecoration(
+                            labelText: 'Precio de VENTA SIN IVA (calc.)',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        TextFormField(
+                          controller: priceCtrl,
+                          keyboardType: TextInputType.number,
+                          enabled: !autoPrice,
+                          decoration: InputDecoration(
+                            labelText: taxable
+                                ? 'Precio de VENTA (CON IVA)'
+                                : 'Precio de VENTA',
+                            helperText: autoPrice
+                                ? 'Calculado automáticamente'
+                                : 'Editable',
+                          ),
+                          onChanged: (_) {
+                            if (!autoPrice) recalcFromPrice();
+                          },
+                        ),
+                        const SizedBox(height: 8),
+
+                        TextFormField(
+                          controller: stockCtrl,
+                          enabled: false,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Stock (Calculado)',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        SwitchListTile(
+                          title: const Text('Precio es por unidad'),
+                          value: priceIsPerUnit,
+                          onChanged: (v) {
+                            setStateSB(() {
+                              priceIsPerUnit = v;
+                            });
+                          },
+                        ),
+
+                        SwitchListTile(
+                          title: const Text('Producto bajo receta médica'),
+                          value: requiresRx,
+                          onChanged: (v) {
+                            setStateSB(() {
+                              requiresRx = v;
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 8),
+
+                        DropdownButtonFormField<String>(
+                          value: pharmForm.isNotEmpty ? pharmForm : null,
+                          decoration: const InputDecoration(
+                            labelText: 'Forma farmacéutica',
+                            helperText: 'Ej: Tableta, Cápsula, Jarabe…',
+                          ),
+                          items: pharmOptions
+                              .map(
+                                (e) => DropdownMenuItem(
+                                  value: e,
+                                  child: Text(e),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            setStateSB(() {
+                              pharmForm = v ?? '';
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 8),
+
+                        DropdownButtonFormField<String>(
+                          value: route.isNotEmpty ? route : null,
+                          decoration: const InputDecoration(
+                            labelText: 'Vía de administración',
+                            helperText: 'Ej: Oral, Tópica, Oftálmica…',
+                          ),
+                          items: routeOptions
+                              .map(
+                                (e) => DropdownMenuItem(
+                                  value: e,
+                                  child: Text(e),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            setStateSB(() {
+                              route = v ?? '';
+                            });
+                          },
+                        ),
+                        const SizedBox(height: 8),
+
+                        TextFormField(
+                          controller: strengthCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Concentración',
+                            helperText: 'Ej: 500 mg • 5 mg/5 mL',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        TextFormField(
+                          controller: presentationCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Presentación',
+                            helperText: 'Ej: Caja x10 • Frasco 120 mL',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+
+                        TextFormField(
+                          controller: unitsPerPackCtrl,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Unidades por empaque',
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
+                        ElevatedButton.icon(
+                          icon: const Icon(Icons.save),
+                          label: Text(
+                            title.toLowerCase().contains('editar')
+                                ? 'Actualizar'
+                                : 'Agregar',
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: kGreen2,
+                            foregroundColor: Colors.white,
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          onPressed: () async {
+                            if (!formKey.currentState!.validate()) return;
+
+                            final payload = <String, dynamic>{
+                              'name': nameCtrl.text.trim(),
+                              'sku': skuCtrl.text.trim(),
+                              'category': (category ?? '').trim(),
+                              'description': descCtrl.text.trim(),
+                              'purchasePrice':
+                                  _toNum(purchasePriceCtrl.text),
+                              'marginPercent': _toNum(
+                                marginCtrl.text.isEmpty
+                                    ? '10'
+                                    : marginCtrl.text,
                               ),
-                            ),
-                            onPressed: handleSave,
-                          ),
-                          const SizedBox(height: 8),
-                          OutlinedButton(
-                            onPressed: () =>
-                                Navigator.of(dialogContext).pop(),
-                            child: const Text('Cancelar'),
-                          ),
-                        ],
-                      ),
+                              'taxable': taxable,
+                              'ivaPercent': _toNum(
+                                ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text,
+                              ),
+                              'salePriceNet': _toNum(saleNetCtrl.text),
+                              'price': _toNum(priceCtrl.text),
+                              'priceIsPerUnit': priceIsPerUnit,
+                              'stock': _toNum(stockCtrl.text),
+                              'providerId': providerId,
+                              'requiresPrescription': requiresRx,
+                              'pharmForm': pharmForm.trim(),
+                              'route': route.trim(),
+                              'strength': strengthCtrl.text.trim(),
+                              'presentation': presentationCtrl.text.trim(),
+                              'unitsPerPack': _toNum(
+                                unitsPerPackCtrl.text.isEmpty
+                                    ? '1'
+                                    : unitsPerPackCtrl.text,
+                              ),
+                            };
+
+                            if (autoPrice) {
+                              final purchase =
+                                  _toNum(purchasePriceCtrl.text).toDouble();
+                              final margin =
+                                  _toNum(marginCtrl.text.isEmpty
+                                              ? '10'
+                                              : marginCtrl.text)
+                                      .toDouble();
+                              final iva =
+                                  _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text)
+                                      .toDouble();
+                              final net = purchase * (1 + (margin / 100));
+                              final gross =
+                                  taxable ? net * (1 + (iva / 100)) : net;
+                              payload['salePriceNet'] = net;
+                              payload['price'] = gross;
+                            } else {
+                              final gross = _toNum(priceCtrl.text).toDouble();
+                              final iva =
+                                  _toNum(ivaCtrl.text.isEmpty ? '13' : ivaCtrl.text)
+                                      .toDouble();
+                              final net =
+                                  taxable ? (gross / (1 + (iva / 100))) : gross;
+                              payload['salePriceNet'] = net;
+                            }
+
+                            Navigator.of(dialogContext).pop();
+                            await onSubmit(payload);
+                          },
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton(
+                          onPressed: () =>
+                              Navigator.of(dialogContext).pop(),
+                          child: const Text('Cancelar'),
+                        ),
+                      ],
                     ),
                   ),
                 ),
-              );
-            },
-          ),
+              ),
+            );
+          },
         );
       },
     );
   }
 
   // Diálogo “Nueva categoría”
-  Future<String?> _showAddCategoryDialog(BuildContext dialogCtx,
-      {String initial = ''}) async {
+  Future<String?> _showAddCategoryDialog(
+    BuildContext dialogCtx, {
+    String initial = '',
+  }) async {
     final TextEditingController newCatCtrl =
         TextEditingController(text: initial);
     final String? res = await showDialog<String>(
