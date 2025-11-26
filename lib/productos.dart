@@ -759,6 +759,9 @@ class _AdminProductManagerState extends State<AdminProductManager> {
               final double smallFieldW =
                   isSmall ? maxW - horizontalPadding * 2 : 220;
 
+              // 🔹 Ancho total disponible dentro del diálogo
+              final double fullWidth = maxW - horizontalPadding * 2;
+
               Widget labeled(Widget child) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 6.0),
                     child: child,
@@ -797,9 +800,9 @@ class _AdminProductManagerState extends State<AdminProductManager> {
                     ),
                   ),
 
-                  // CATEGORÍA: dropdown + botón (+) al lado, para evitar overflow
+                  // CATEGORÍA: dropdown + botón (+) al lado, usando todo el ancho
                   SizedBox(
-                    width: fieldW,
+                    width: fullWidth,
                     child: labeled(
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
