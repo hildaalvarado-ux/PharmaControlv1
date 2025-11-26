@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'ingreso_form.dart';
 import 'egreso_form.dart';
 import 'movements_pdf.dart';
+import 'iva_retenido_pdf.dart';
 import 'pdf_output_mobile.dart'
     if (dart.library.html) 'pdf_output_web.dart' as pdf_out;
 
@@ -270,8 +271,9 @@ class _MovementsManagerState extends State<MovementsManager> {
       final snap = await _buildQuery().get();
       final now = DateTime.now();
       final currentMonthStart = DateTime(now.year, now.month, 1);
-      final nextMonthStart =
-          (now.month == 12) ? DateTime(now.year + 1, 1, 1) : DateTime(now.year, now.month + 1, 1);
+      final nextMonthStart = (now.month == 12)
+          ? DateTime(now.year + 1, 1, 1)
+          : DateTime(now.year, now.month + 1, 1);
 
       final pending = <Map<String, dynamic>>[];
       final current = <Map<String, dynamic>>[];
@@ -345,12 +347,10 @@ class _MovementsManagerState extends State<MovementsManager> {
     try {
       setState(() => _busy = true);
 
-      final bytes = await MovementsPdf.build(
-        title: 'Reporte de IVA retenido',
-        filterLabel: 'Egresos con IVA retenido',
+      final bytes = await IvaRetenidoPdf.build(
         from: _from,
         to: _to,
-        movements: ivaMovs,
+        ivaMovs: ivaMovs,
       );
 
       final now = DateTime.now();
@@ -659,6 +659,7 @@ class _MovementsManagerState extends State<MovementsManager> {
           final totalAmount = _toMoney(m['totalAmount']);
           final type = (m['type'] ?? '').toString().toLowerCase();
           final counterparty = (m['counterpartyName'] ?? '').toString();
+          final ivaRet = _toMoney(m['ivaRetenido'] ?? 0);
 
           String? counterpartyLabel;
           if (counterparty.isNotEmpty) {
@@ -693,7 +694,8 @@ class _MovementsManagerState extends State<MovementsManager> {
                     ),
                   Text(
                     'Líneas: ${(m['totalItems'] ?? items.length).toString()} • '
-                    'Total: ${totalAmount.toStringAsFixed(2)}',
+                    'Total: ${totalAmount.toStringAsFixed(2)}'
+                    '${ivaRet > 0 ? ' • IVA ret: ${ivaRet.toStringAsFixed(2)}' : ''}',
                   ),
                   if (counterpartyLabel != null) Text(counterpartyLabel),
                   if ((m['note'] ?? '').toString().isNotEmpty)
@@ -707,9 +709,11 @@ class _MovementsManagerState extends State<MovementsManager> {
                 ...items.map((it) {
                   final qty = _toInt(it['qty']);
                   final unitPrice = _toMoney(
-                    it['unitPrice'] ??
-                        it['purchasePrice'] ??
-                        it['salePrice'],
+                    it['unitPriceWithVat'] ??
+                        it['unitPrice'] ??
+                        it['unitPriceWithoutVat'] ??
+                        it['salePrice'] ??
+                        it['purchasePrice'],
                   );
                   final subtotal = _toMoney(it['subtotal']);
 
@@ -728,6 +732,7 @@ class _MovementsManagerState extends State<MovementsManager> {
                       'Cant: $qty • '
                       'P. unidad: ${unitPrice.toStringAsFixed(2)} • '
                       'Subtotal: ${subtotal.toStringAsFixed(2)}',
+                      style: const TextStyle(fontSize: 14),
                     ),
                     trailing: stockText.isEmpty ? null : Text(stockText),
                   );
@@ -764,6 +769,7 @@ class _MovementsManagerState extends State<MovementsManager> {
           const DataColumn(label: Text('Usuario')),
           const DataColumn(label: Text('Contraparte')),
           const DataColumn(label: Text('Líneas')),
+          const DataColumn(label: Text('IVA retenido')),
           const DataColumn(label: Text('Total')),
           if (deletedSection)
             const DataColumn(label: Text('Motivo eliminación')),
@@ -785,6 +791,7 @@ class _MovementsManagerState extends State<MovementsManager> {
           final type = (m['type'] ?? '').toString().toLowerCase();
           final counterparty =
               (m['counterpartyName'] ?? '—').toString();
+          final ivaRet = _toMoney(m['ivaRetenido'] ?? 0);
 
           String? counterpartyLabel;
           if (counterparty != '—' && counterparty.isNotEmpty) {
@@ -795,132 +802,140 @@ class _MovementsManagerState extends State<MovementsManager> {
 
           final deleteReason = (m['deleteReason'] ?? '').toString();
 
+          final cells = <DataCell>[
+            DataCell(
+              Text(
+                dt == null
+                    ? '—'
+                    : '${dt.day}/${dt.month}/${dt.year} '
+                        '${dt.hour.toString().padLeft(2, '0')}:'
+                        '${dt.minute.toString().padLeft(2, '0')}',
+              ),
+            ),
+            DataCell(
+              Chip(
+                label: Text(type == 'ingreso' ? 'Ingreso' : 'Egreso'),
+              ),
+            ),
+            DataCell(
+              Text(m['createdByName'] ?? '—'),
+            ),
+            DataCell(
+              Text(counterpartyLabel ?? '—'),
+            ),
+            DataCell(
+              Text(
+                (m['totalItems'] ?? items.length).toString(),
+              ),
+            ),
+            DataCell(
+              Text(ivaRet.toStringAsFixed(2)),
+            ),
+            DataCell(
+              Text(totalAmount.toStringAsFixed(2)),
+            ),
+            if (deletedSection)
+              DataCell(
+                Text(deleteReason.isEmpty ? '—' : deleteReason),
+              ),
+            DataCell(
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.list),
+                    tooltip: 'Ver líneas',
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (cx) => AlertDialog(
+                          title: const Text('Detalle del movimiento'),
+                          content: SizedBox(
+                            width: 600,
+                            child: ListView(
+                              shrinkWrap: true,
+                              children: [
+                                if ((m['note'] ?? '')
+                                    .toString()
+                                    .isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.only(
+                                        bottom: 8.0),
+                                    child: Text('Nota: ${m['note']}'),
+                                  ),
+                                ...items.map((it) {
+                                  final qty = _toInt(it['qty']);
+                                  final unitPrice = _toMoney(
+                                    it['unitPriceWithVat'] ??
+                                        it['unitPrice'] ??
+                                        it['unitPriceWithoutVat'] ??
+                                        it['salePrice'] ??
+                                        it['purchasePrice'],
+                                  );
+                                  final subtotal =
+                                      _toMoney(it['subtotal']);
+
+                                  final stockBefore =
+                                      it['stockBefore'];
+                                  final stockAfter =
+                                      it['stockAfter'];
+                                  String stockText = '';
+                                  if (stockBefore is num &&
+                                      stockAfter is num) {
+                                    stockText =
+                                        'Stock: ${_toInt(stockBefore)} → ${_toInt(stockAfter)}';
+                                  }
+
+                                  return ListTile(
+                                    dense: true,
+                                    title: Text(
+                                      '${it['productName']} (SKU: ${it['sku']})',
+                                    ),
+                                    subtitle: Text(
+                                      'Cant: $qty • '
+                                      'P. unidad: ${unitPrice.toStringAsFixed(2)} • '
+                                      'Subtotal: ${subtotal.toStringAsFixed(2)}',
+                                      style: const TextStyle(fontSize: 14),
+                                    ),
+                                    trailing: stockText.isEmpty
+                                        ? null
+                                        : Text(stockText),
+                                  );
+                                }).toList(),
+                              ],
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(cx),
+                              child: const Text('Cerrar'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                  deletedSection
+                      ? IconButton(
+                          icon: const Icon(Icons.restore),
+                          tooltip: 'Restaurar',
+                          onPressed: () => _restoreMovement(d),
+                        )
+                      : IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          tooltip: 'Eliminar',
+                          onPressed: () => _softDeleteMovement(d),
+                        ),
+                ],
+              ),
+            ),
+          ];
+
           return DataRow(
             color: deletedSection
                 ? MaterialStateProperty.all(Colors.grey.shade200)
                 : null,
-            cells: [
-              DataCell(
-                Text(
-                  dt == null
-                      ? '—'
-                      : '${dt.day}/${dt.month}/${dt.year} '
-                          '${dt.hour.toString().padLeft(2, '0')}:'
-                          '${dt.minute.toString().padLeft(2, '0')}',
-                ),
-              ),
-              DataCell(
-                Chip(
-                  label: Text(type == 'ingreso' ? 'Ingreso' : 'Egreso'),
-                ),
-              ),
-              DataCell(
-                Text(m['createdByName'] ?? '—'),
-              ),
-              DataCell(
-                Text(counterpartyLabel ?? '—'),
-              ),
-              DataCell(
-                Text(
-                  (m['totalItems'] ?? items.length).toString(),
-                ),
-              ),
-              DataCell(
-                Text(totalAmount.toStringAsFixed(2)),
-              ),
-              if (deletedSection)
-                DataCell(
-                  Text(deleteReason.isEmpty ? '—' : deleteReason),
-                ),
-              DataCell(
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.list),
-                      tooltip: 'Ver líneas',
-                      onPressed: () {
-                        showDialog(
-                          context: context,
-                          builder: (cx) => AlertDialog(
-                            title: const Text('Detalle del movimiento'),
-                            content: SizedBox(
-                              width: 600,
-                              child: ListView(
-                                shrinkWrap: true,
-                                children: [
-                                  if ((m['note'] ?? '')
-                                      .toString()
-                                      .isNotEmpty)
-                                    Padding(
-                                      padding: const EdgeInsets.only(
-                                          bottom: 8.0),
-                                      child: Text('Nota: ${m['note']}'),
-                                    ),
-                                  ...items.map((it) {
-                                    final qty = _toInt(it['qty']);
-                                    final unitPrice = _toMoney(
-                                      it['unitPrice'] ??
-                                          it['purchasePrice'] ??
-                                          it['salePrice'],
-                                    );
-                                    final subtotal =
-                                        _toMoney(it['subtotal']);
-
-                                    final stockBefore =
-                                        it['stockBefore'];
-                                    final stockAfter =
-                                        it['stockAfter'];
-                                    String stockText = '';
-                                    if (stockBefore is num &&
-                                        stockAfter is num) {
-                                      stockText =
-                                          'Stock: ${_toInt(stockBefore)} → ${_toInt(stockAfter)}';
-                                    }
-
-                                    return ListTile(
-                                      dense: true,
-                                      title: Text(
-                                        '${it['productName']} (SKU: ${it['sku']})',
-                                      ),
-                                      subtitle: Text(
-                                        'Cant: $qty • '
-                                        'P. unidad: ${unitPrice.toStringAsFixed(2)} • '
-                                        'Subtotal: ${subtotal.toStringAsFixed(2)}',
-                                      ),
-                                      trailing: stockText.isEmpty
-                                          ? null
-                                          : Text(stockText),
-                                    );
-                                  }).toList(),
-                                ],
-                              ),
-                            ),
-                            actions: [
-                              TextButton(
-                                onPressed: () => Navigator.pop(cx),
-                                child: const Text('Cerrar'),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                    deletedSection
-                        ? IconButton(
-                            icon: const Icon(Icons.restore),
-                            tooltip: 'Restaurar',
-                            onPressed: () => _restoreMovement(d),
-                          )
-                        : IconButton(
-                            icon: const Icon(Icons.delete_outline),
-                            tooltip: 'Eliminar',
-                            onPressed: () => _softDeleteMovement(d),
-                          ),
-                  ],
-                ),
-              ),
-            ],
+            cells: cells,
           );
         }).toList(),
       ),
@@ -947,14 +962,14 @@ class _IvaRetenidoDialog extends StatefulWidget {
 }
 
 class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
-  final Map<String, bool> _pagado = {};
-  final Map<String, String> _comprobantes = {};
+  // pago a nivel de grupo (todo lo pendiente)
+  bool _grupoPendientePagado = false;
+  String? _comprobanteGrupo;
 
   double _totalIvaPendiente() {
+    if (_grupoPendientePagado) return 0.0;
     double total = 0;
     for (final m in widget.pendientes) {
-      final id = (m['id'] ?? '').toString();
-      if (_pagado[id] == true) continue;
       final ivaRet = (m['_ivaRetenido'] ?? 0.0) as double;
       total += ivaRet;
     }
@@ -970,8 +985,7 @@ class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
     return total;
   }
 
-  Future<void> _marcarComoPagado(Map<String, dynamic> mov) async {
-    final id = (mov['id'] ?? '').toString();
+  Future<void> _marcarGrupoComoPagado() async {
     final ctrl = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
@@ -979,7 +993,7 @@ class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        title: const Text('Registrar pago de IVA'),
+        title: const Text('Registrar pago de IVA pendiente'),
         content: Form(
           key: formKey,
           child: TextFormField(
@@ -1002,6 +1016,10 @@ class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
             child: const Text('Cancelar'),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
             onPressed: () {
               if (!formKey.currentState!.validate()) return;
               Navigator.pop(ctx, true);
@@ -1014,8 +1032,8 @@ class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
 
     if (ok == true) {
       setState(() {
-        _pagado[id] = true;
-        _comprobantes[id] = ctrl.text.trim();
+        _grupoPendientePagado = true;
+        _comprobanteGrupo = ctrl.text.trim();
       });
     }
   }
@@ -1056,11 +1074,38 @@ class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
               const SizedBox(height: 4),
               Align(
                 alignment: Alignment.centerRight,
-                child: Text(
-                  'Total IVA retenido pendiente: ${_totalIvaPendiente().toStringAsFixed(2)}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Total IVA retenido pendiente: ${_totalIvaPendiente().toStringAsFixed(2)}',
+                      style:
+                          Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                    ),
+                    const SizedBox(width: 12),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _grupoPendientePagado
+                            ? Colors.green
+                            : Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 8),
+                        textStyle: const TextStyle(fontSize: 12),
                       ),
+                      onPressed: widget.pendientes.isEmpty ||
+                              _grupoPendientePagado
+                          ? null
+                          : _marcarGrupoComoPagado,
+                      child: Text(
+                        _grupoPendientePagado
+                            ? 'Pagado'
+                            : 'Marcar como pagado',
+                      ),
+                    ),
+                  ],
                 ),
               ),
 
@@ -1085,7 +1130,7 @@ class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
               ),
               const SizedBox(height: 8),
               Text(
-                'La opción de marcar como pagado para el mes actual estará disponible al cierre del mes.',
+                'La opción de pago del mes actual se debe gestionar al cierre del mes (aquí es solo informativo).',
                 style: Theme.of(context)
                     .textTheme
                     .bodySmall
@@ -1127,26 +1172,20 @@ class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
           DataColumn(label: Text('Fecha')),
           DataColumn(label: Text('Usuario')),
           DataColumn(label: Text('Cliente')),
-          DataColumn(label: Text('Subtotal')),
-          DataColumn(label: Text('IVA')),
-          DataColumn(label: Text('IVA retenido')),
-          DataColumn(label: Text('Total')),
+          DataColumn(label: Text('IVA retenido (13%)')),
+          DataColumn(label: Text('Total venta')),
           DataColumn(label: Text('Estado')),
-          DataColumn(label: Text('Acciones')),
         ],
         rows: items.map((m) {
-          final id = (m['id'] ?? '').toString();
           final dt = m['createdAtDateTime'] as DateTime;
           final user = (m['createdByName'] ?? '—').toString();
           final client = (m['counterpartyName'] ?? '—').toString();
 
-          final subtotal = (m['_subtotal'] ?? 0.0) as double;
-          final iva = (m['_iva'] ?? 0.0) as double;
           final ivaRet = (m['_ivaRetenido'] ?? 0.0) as double;
           final total = (m['_total'] ?? 0.0) as double;
 
-          final pagado = _pagado[id] == true;
-          final comp = _comprobantes[id];
+          final pagadoGrupo = allowMarkPaid && _grupoPendientePagado;
+          final comp = _comprobanteGrupo;
 
           return DataRow(
             cells: [
@@ -1157,25 +1196,32 @@ class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
               ),
               DataCell(Text(user)),
               DataCell(Text(client)),
-              DataCell(Text(subtotal.toStringAsFixed(2))),
-              DataCell(Text(iva.toStringAsFixed(2))),
               DataCell(Text(ivaRet.toStringAsFixed(2))),
               DataCell(Text(total.toStringAsFixed(2))),
               DataCell(
-                pagado
-                    ? Text('Pagado\nComp: $comp')
-                    : const Text('Pendiente'),
-              ),
-              DataCell(
-                allowMarkPaid
-                    ? TextButton(
-                        onPressed: pagado ? null : () => _marcarComoPagado(m),
-                        child: Text(pagado ? 'Pagado' : 'Marcar como pagado'),
-                      )
-                    : const Text(
-                        'Solo al\nfinal del mes',
-                        textAlign: TextAlign.center,
-                      ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: pagadoGrupo
+                        ? Colors.green.shade100
+                        : Colors.red.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    pagadoGrupo
+                        ? (comp == null || comp.isEmpty
+                            ? 'Pagado'
+                            : 'Pagado\nComp: $comp')
+                        : 'Pendiente',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: pagadoGrupo
+                          ? Colors.green.shade800
+                          : Colors.red.shade800,
+                    ),
+                  ),
+                ),
               ),
             ],
           );

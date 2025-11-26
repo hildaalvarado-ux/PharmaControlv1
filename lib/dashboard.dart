@@ -10,6 +10,8 @@ import 'carrusel.dart';
 import 'proveedores.dart';
 import 'sobre_nosotros.dart';
 import 'preguntas_frecuentes.dart';
+import 'AdminInventory.dart';
+import 'ingreso_form.dart'; // <<< IMPORT PARA INGRESOS
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -98,6 +100,7 @@ class _DashboardPageState extends State<DashboardPage> {
   void _openProveedores() => _selectPage(6);
   void _openSobreNosotros() => _selectPage(7);
   void _openPreguntasFrecuentes() => _selectPage(8);
+  void _openIngresos() => _selectPage(9); // <<< NUEVO: INGRESOS (COMPRAS)
 
   // ---- Menú Drawer
   Widget _buildMenuTile({required IconData icon, required String title, VoidCallback? onTap}) {
@@ -138,9 +141,17 @@ class _DashboardPageState extends State<DashboardPage> {
         const SizedBox(height: 8),
         _buildMenuTile(icon: Icons.local_offer, title: 'Ofertas', onTap: _openOfertas),
         _buildMenuTile(icon: Icons.production_quantity_limits, title: 'Gestionar productos', onTap: _openProductos),
-        // Inventario también visible para farmacéutico
         _buildMenuTile(icon: Icons.inventory_2, title: 'Inventario', onTap: _openInventario),
-        _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar venta (Factura)', onTap: _openEgresos),
+        _buildMenuTile(
+          icon: Icons.add_shopping_cart,
+          title: 'Registrar ingreso (Compras)',
+          onTap: _openIngresos,
+        ), // <<< NUEVO
+        _buildMenuTile(
+          icon: Icons.remove_shopping_cart,
+          title: 'Registrar venta (Factura)',
+          onTap: _openEgresos,
+        ),
       ],
     );
   }
@@ -152,7 +163,11 @@ class _DashboardPageState extends State<DashboardPage> {
         const Text('Panel Vendedor', style: TextStyle(fontWeight: FontWeight.bold)),
         const SizedBox(height: 8),
         _buildMenuTile(icon: Icons.local_offer, title: 'Ofertas', onTap: _openOfertas),
-        _buildMenuTile(icon: Icons.remove_shopping_cart, title: 'Registrar venta (Factura)', onTap: _openEgresos),
+        _buildMenuTile(
+          icon: Icons.remove_shopping_cart,
+          title: 'Registrar venta (Factura)',
+          onTap: _openEgresos,
+        ),
       ],
     );
   }
@@ -173,7 +188,10 @@ class _DashboardPageState extends State<DashboardPage> {
     actions.add(
       TextButton(
         onPressed: _openOfertas,
-        child: const Text("Ofertas", style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+        child: const Text(
+          "Ofertas",
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+        ),
       ),
     );
 
@@ -186,20 +204,43 @@ class _DashboardPageState extends State<DashboardPage> {
         TextButton(onPressed: _openProveedores, child: const Text("Proveedores", style: TextStyle(color: Colors.white))),
       ]);
     } else if (role == 'farmaceutico' || role == 'farmacéutico') {
-      // Farmacéutico también ve Inventario y Registrar venta en la AppBar
       actions.addAll([
         TextButton(onPressed: _openProductos, child: const Text("Productos", style: TextStyle(color: Colors.white))),
         TextButton(onPressed: _openInventario, child: const Text("Inventario", style: TextStyle(color: Colors.white))),
-        TextButton(onPressed: _openEgresos, child: const Text("Registrar venta", style: TextStyle(color: Colors.white))),
+        TextButton(
+          onPressed: _openIngresos,
+          child: const Text("Registrar ingreso", style: TextStyle(color: Colors.white)),
+        ), // <<< NUEVO
+        TextButton(
+          onPressed: _openEgresos,
+          child: const Text("Registrar venta", style: TextStyle(color: Colors.white)),
+        ),
       ]);
     } else if (role == 'vendedor') {
-      actions.add(TextButton(onPressed: _openEgresos, child: const Text("Registrar venta", style: TextStyle(color: Colors.white))));
+      actions.add(
+        TextButton(
+          onPressed: _openEgresos,
+          child: const Text("Registrar venta", style: TextStyle(color: Colors.white)),
+        ),
+      );
     }
 
-    actions.add(TextButton(onPressed: _openSobreNosotros, child: const Text("Sobre nosotros", style: TextStyle(color: Colors.white))));
-    actions.add(TextButton(onPressed: _openPreguntasFrecuentes, child: const Text("Preguntas frecuentes", style: TextStyle(color: Colors.white))));
-    actions.add(IconButton(onPressed: _onSignOutPressed, icon: const Icon(Icons.logout, color: Colors.white)));
-    
+    actions.add(
+      TextButton(
+        onPressed: _openSobreNosotros,
+        child: const Text("Sobre nosotros", style: TextStyle(color: Colors.white)),
+      ),
+    );
+    actions.add(
+      TextButton(
+        onPressed: _openPreguntasFrecuentes,
+        child: const Text("Preguntas frecuentes", style: TextStyle(color: Colors.white)),
+      ),
+    );
+    actions.add(
+      IconButton(onPressed: _onSignOutPressed, icon: const Icon(Icons.logout, color: Colors.white)),
+    );
+
     return actions;
   }
 
@@ -208,9 +249,9 @@ class _DashboardPageState extends State<DashboardPage> {
   Widget _pageUsuarios() => const AdminUserManager();
   Widget _pageProductos() => const AdminProductManager();
   Widget _pageMovimientos() => const MovementsManager();
-  // Reutiliza el gestor de productos para Inventario
-  Widget _pageInventario() => const AdminProductManager();
+  Widget _pageInventario() => const AdminInventoryPage();
   Widget _pageEgresos() => EgresoFormWidget();
+  Widget _pageIngresos() => IngresoFormWidget(); // <<< NUEVO
 
   Widget _cardContentByIndex() {
     switch (_selectedIndex) {
@@ -231,11 +272,12 @@ class _DashboardPageState extends State<DashboardPage> {
       case 7:
         return const SobreNosotrosPage();
       case 8:
-        case 8:
         return PreguntasFrecuentesPage(role: _roleNorm());
+      case 9:
+        return _pageIngresos(); // <<< INGRESOS
       default:
         return _pageOfertas();
-  }
+    }
   }
 
   // ---- AppBar title: SOLO texto
@@ -278,12 +320,17 @@ class _DashboardPageState extends State<DashboardPage> {
           ? Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text('Bienvenido, $_name',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kGreen1)),
+                Text(
+                  'Bienvenido, $_name',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: kGreen1),
+                ),
                 const SizedBox(height: 4),
-                Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
-                    textAlign: TextAlign.center, style: const TextStyle(fontSize: 14)),
+                Text(
+                  'Rol: ${_role.isNotEmpty ? _role : '—'}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 14),
+                ),
                 const SizedBox(height: 10),
                 logo,
               ],
@@ -294,8 +341,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Bienvenido, $_name',
-                          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: kGreen1)),
+                      Text(
+                        'Bienvenido, $_name',
+                        style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: kGreen1),
+                      ),
                       const SizedBox(height: 6),
                       Text('Rol: ${_role.isNotEmpty ? _role : '—'}', style: const TextStyle(fontSize: 14)),
                     ],
@@ -318,8 +367,10 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('PharmaControl',
-                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+              const Text(
+                'PharmaControl',
+                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+              ),
               const SizedBox(height: 10),
               Container(
                 height: 56,
@@ -329,18 +380,26 @@ class _DashboardPageState extends State<DashboardPage> {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Image.asset('assets/logo.png', fit: BoxFit.contain,
-                    errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, color: Colors.green)),
+                child: Image.asset(
+                  'assets/logo.png',
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Icon(Icons.inventory_2, color: Colors.green),
+                ),
               ),
               const SizedBox(height: 10),
               Text('Bienvenido, $_name', style: const TextStyle(color: Colors.white70)),
               const SizedBox(height: 4),
-              Text('Rol: ${_role.isNotEmpty ? _role : '—'}',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              Text(
+                'Rol: ${_role.isNotEmpty ? _role : '—'}',
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
             ],
           ),
         ),
-        Padding(padding: const EdgeInsets.symmetric(horizontal: 8.0), child: _menuForRole()),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8.0),
+          child: _menuForRole(),
+        ),
         const SizedBox(height: 8),
         const Divider(),
         _buildMenuTile(icon: Icons.info_outline, title: 'Sobre nosotros', onTap: _openSobreNosotros),
@@ -386,7 +445,6 @@ class _DashboardPageState extends State<DashboardPage> {
           child: SafeArea(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())
-                // ---- Aquí se muestra TODO dentro del mismo layout (header + card)
                 : SingleChildScrollView(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -398,7 +456,6 @@ class _DashboardPageState extends State<DashboardPage> {
                           elevation: 3,
                           child: Padding(
                             padding: const EdgeInsets.all(16),
-                            // El contenido (incluye Egresos) se muestra aquí dentro
                             child: _cardContentByIndex(),
                           ),
                         ),

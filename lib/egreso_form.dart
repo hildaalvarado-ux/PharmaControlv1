@@ -24,7 +24,8 @@ class SaleLine {
   double ivaPercent;
   int stock;
   int qty;
-  double unitPrice; // unit price INCLUYE IVA
+  double unitPriceWithoutVat; // precio NETO (sin IVA)
+  double unitPriceWithVat; // precio con IVA
   double discountPercent; // porcentaje de descuento aplicado
 
   SaleLine({
@@ -34,11 +35,12 @@ class SaleLine {
     required this.ivaPercent,
     required this.stock,
     this.qty = 1,
-    required this.unitPrice,
+    required this.unitPriceWithoutVat,
+    required this.unitPriceWithVat,
     this.discountPercent = 0.0,
   });
 
-  double get subtotal => unitPrice * qty;
+  double get subtotal => unitPriceWithVat * qty; // subtotal con IVA
 }
 
 class _EgresoFormWidgetState extends State<EgresoFormWidget> {
@@ -83,7 +85,9 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   Future<void> _loadProducts() async {
     final snap = await productsRef.orderBy('name').get();
     _products = snap.docs;
-    _pmap = {for (final d in snap.docs) d.id: (d.data() as Map<String, dynamic>)};
+    _pmap = {
+      for (final d in snap.docs) d.id: (d.data() as Map<String, dynamic>),
+    };
     if (mounted) setState(() {});
   }
 
@@ -103,15 +107,20 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       final discountPct = await _bestDiscountFor(pid, pdata);
 
       // Calculamos precio de venta (partiendo de precio SIN IVA) + aplicamos descuento y luego IVA
-      final finalPrice = _computeSaleUnitPrice(pdata, discountPct);
+      final priceWithoutVat = _computeSaleUnitPrice(pdata, discountPct);
+      final ivaPercent = _toDouble(pdata['ivaPercent'] ?? 13);
+      final taxable = (pdata['taxable'] ?? false) == true;
+      final priceWithVat =
+          taxable ? priceWithoutVat * (1 + ivaPercent / 100) : priceWithoutVat;
 
       _addLine(
         productId: pid,
         name: pdata['name'] ?? 'Producto',
-        unitPrice: finalPrice, // ya incluye IVA
+        unitPriceWithoutVat: priceWithoutVat,
+        unitPriceWithVat: priceWithVat,
         stock: _toInt(pdata['stock']),
-        taxable: (pdata['taxable'] ?? false) == true,
-        ivaPercent: _toDouble(pdata['ivaPercent'] ?? 13),
+        taxable: taxable,
+        ivaPercent: ivaPercent,
         discountPct: discountPct,
       );
 
@@ -169,49 +178,43 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     return 0.0;
   }
 
-  // ========= LÓGICA PRECIO DE VENTA + IVA (AJUSTADA) =========
+  // ========= LÓGICA PRECIO DE VENTA (SIN IVA) =========
   //
-  // Reglas (inventario almacenado SIN IVA):
-  // - 'salePriceNet' o 'salePrice'  -> precio de venta NETO (sin IVA).
-  // - Si no existen, 'price' se toma como precio de venta NETO (sin IVA).
-  // - Si hay marginPercent/profitMargin/markup, se aplica sobre ese base.
-  // - Luego se aplica descuento y, al final, el IVA (si el producto grava).
-  // - El valor retornado SIEMPRE será precio FINAL con IVA (para cobrar al cliente).
+  // Regla importante:
+  // - En la colección products, el campo `price` se guarda como PRECIO DE VENTA SIN IVA.
+  // - `purchasePrice` es el costo sin IVA.
+  // - `marginPercent` se usa solo para sugerir un precio cuando `price` está vacío.
+  //
+  // Este método SIEMPRE devuelve un precio NETO (sin IVA).
   double _computeSaleUnitPrice(Map<String, dynamic> pdata, double discountPct) {
-    // 1) Determinar base neta (sin IVA)
     double baseNet;
 
+    // 1) Campos explícitos de venta neta, si existen
     if (pdata.containsKey('salePriceNet')) {
       baseNet = _toDouble(pdata['salePriceNet']);
     } else if (pdata.containsKey('salePrice')) {
       baseNet = _toDouble(pdata['salePrice']);
+    } else if (pdata.containsKey('price')) {
+      // `price` ya es PRECIO DE VENTA SIN IVA (ej: 0.24)
+      baseNet = _toDouble(pdata['price']);
     } else {
-      // Usamos 'price' como precio neto o costo + margen
-      final priceField = _toDouble(pdata['price']);
+      // Si no hay `price`, calculamos desde el costo + margen
+      final cost = _toDouble(pdata['purchasePrice']);
       final margin =
           _toDouble(pdata['marginPercent'] ?? pdata['profitMargin'] ?? pdata['markup'] ?? 0);
-      if (margin != 0) {
-        // priceField como costo y margin como % de ganancia
-        baseNet = priceField * (1 + margin / 100);
+      if (cost > 0 && margin != 0) {
+        baseNet = cost * (1 + margin / 100);
       } else {
-        // si no hay margen, tomamos 'price' directamente como precio NETO de venta
-        baseNet = priceField;
+        baseNet = cost;
       }
     }
 
-    // 2) Aplicar descuento sobre el precio neto
+    // 4) Aplicar descuento sobre el precio neto
     if (discountPct > 0) {
       baseNet = baseNet * (1 - discountPct / 100);
     }
 
-    // 3) Agregar IVA si el producto grava
-    final iva = _toDouble(pdata['ivaPercent'] ?? 13);
-    final taxable = (pdata['taxable'] ?? false) == true;
-    if (taxable) {
-      baseNet = baseNet * (1 + iva / 100);
-    }
-
-    // Resultado: precio FINAL con IVA
+    // Resultado: precio NETO sin IVA (ej: 0.24)
     return baseNet;
   }
 
@@ -266,7 +269,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   void _addLine({
     required String productId,
     required String name,
-    required double unitPrice,
+    required double unitPriceWithoutVat,
+    required double unitPriceWithVat,
     required int stock,
     required bool taxable,
     required double ivaPercent,
@@ -284,7 +288,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       SaleLine(
         productId: productId,
         name: name,
-        unitPrice: unitPrice, // YA incluye IVA
+        unitPriceWithoutVat: unitPriceWithoutVat,
+        unitPriceWithVat: unitPriceWithVat,
         stock: stock,
         taxable: taxable,
         ivaPercent: ivaPercent,
@@ -309,33 +314,30 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
     });
   }
 
+  // Total CON IVA
   double get _total => _lines.fold(0.0, (s, l) => s + l.subtotal);
 
-  // _ivaTotal asume que l.unitPrice incluye IVA (por eso despejamos la porción IVA)
-  double get _ivaTotal {
-    double t = 0;
-    for (final l in _lines) {
-      if (l.taxable) {
-        final divider = 1 + (l.ivaPercent / 100);
-        final netUnit = l.unitPrice / divider;
-        final ivaUnit = l.unitPrice - netUnit;
-        t += ivaUnit * l.qty;
-      }
-    }
-    return t;
-  }
+  // IVA total = (precio con IVA - precio sin IVA) * cantidad
+  double get _ivaTotal => _lines.fold(
+      0.0,
+      (s, l) =>
+          s +
+          (l.taxable ? (l.unitPriceWithVat - l.unitPriceWithoutVat) * l.qty : 0.0));
 
-  double get _subtotalSinIVA => _total - _ivaTotal;
+  // Subtotal sin IVA
+  double get _subtotalSinIVA =>
+      _lines.fold(0.0, (s, l) => s + l.unitPriceWithoutVat * l.qty);
 
   // Por ahora consideramos que el IVA retenido es igual al IVA generado.
-  // Si más adelante la retención es un porcentaje diferente, aquí se ajusta.
   double get _ivaRetenido => _ivaTotal;
 
   bool _anyRequiresRecipe() {
     for (final l in _lines) {
       final p = _pmap[l.productId];
-      if (p != null && (p['requiresPrescription'] ?? false) == true) return true;
+      if (p != null && (p['requiresPrescription'] ?? false) == true) {
+        return true;
       }
+    }
     return false;
   }
 
@@ -358,15 +360,17 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       buyer: buyer,
       notes: notesCtrl.text.trim(),
       items: _lines
-          .map((l) => InvoiceItem(
-                name: l.name,
-                qty: l.qty,
-                unitPrice: l.unitPrice,
-                subtotal: l.subtotal,
-              ))
+          .map(
+            (l) => InvoiceItem(
+              name: l.name,
+              qty: l.qty,
+              unitPrice: l.unitPriceWithVat, // precio mostrado CON IVA
+              subtotal: l.subtotal,
+            ),
+          )
           .toList(),
-      subtotal: _total, // mostramos el total directamente para que el cliente vea lo cobrado
-      iva: 0.0, // forzar 0 en la línea IVA en el PDF (según tu requerimiento)
+      subtotal: _total, // mostramos el total directamente
+      iva: 0.0, // línea IVA en 0 en el PDF
       total: _total,
     );
 
@@ -420,7 +424,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           final currentStock = _toInt(prodData['stock']);
           if (l.qty > currentStock) {
             throw Exception(
-                'Stock insuficiente para "${l.name}". Disponible: $currentStock');
+              'Stock insuficiente para "${l.name}". Disponible: $currentStock',
+            );
           }
           final stockAfter = currentStock - l.qty;
 
@@ -428,7 +433,8 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
             'productId': l.productId,
             'productName': l.name,
             'qty': l.qty,
-            'unitPrice': l.unitPrice, // incluye IVA
+            'unitPriceWithoutVat': l.unitPriceWithoutVat,
+            'unitPriceWithVat': l.unitPriceWithVat, // incluye IVA
             'subtotal': l.subtotal,
             'taxable': l.taxable,
             'ivaPercent': l.ivaPercent,
@@ -465,7 +471,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           });
         }
 
-        // 6) Crear resumen en 'movements' (para que MovementsManager lo muestre)
+        // 6) Crear resumen en 'movements'
         final movementsRef =
             FirebaseFirestore.instance.collection('movements');
         final movementDocRef = movementsRef.doc();
@@ -505,13 +511,18 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       _showSnack('Venta registrada.');
       await _printCurrentInvoice(saleId: createdId, when: nowWhen);
 
-      // Si la forma está embebida en el Dashboard: limpiar, si fue push: pop con resultado.
+      // 🔴 AQUÍ ESTABA EL Navigator.pop QUE TE SACABA AL LOGIN
+      // if (mounted) {
+      //   if (Navigator.canPop(context)) {
+      //     Navigator.pop(context, {'createdId': createdId});
+      //   } else {
+      //     _clearAll();
+      //   }
+      // }
+
+      // ✅ AHORA: solo limpiamos el formulario y seguimos en la misma pantalla
       if (mounted) {
-        if (Navigator.canPop(context)) {
-          Navigator.pop(context, {'createdId': createdId});
-        } else {
-          _clearAll();
-        }
+        _clearAll();
       }
     } catch (e) {
       _showSnack('No se pudo registrar la venta: $e');
@@ -524,368 +535,405 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
 
   @override
   Widget build(BuildContext context) {
-    // detectamos si ya hay un Scaffold/Material que provea el "look & feel"
     final hasMaterialAncestor =
         context.findAncestorWidgetOfExactType<Material>() != null;
     final hasScaffoldAncestor =
         context.findAncestorWidgetOfExactType<Scaffold>() != null;
 
-    // El contenido real del formulario (tu Column completo)
     final content = Center(
       child: Padding(
         padding: const EdgeInsets.all(8.0),
-        // Permitimos que el widget ocupe todo el ancho disponible del Card del Dashboard.
         child: SingleChildScrollView(
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // <-- Encabezado removido intencionalmente (lo pediste)
-            const SizedBox(height: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 4),
 
-            // BUSCADOR
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green.shade100),
-              ),
-              child: TextField(
-                controller: searchCtrl,
-                decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.search),
-                  hintText: 'Buscar producto por nombre, descripción o SKU...',
-                  border: InputBorder.none,
-                  contentPadding:
-                      EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+              // BUSCADOR
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade100),
+                ),
+                child: TextField(
+                  controller: searchCtrl,
+                  decoration: const InputDecoration(
+                    prefixIcon: Icon(Icons.search),
+                    hintText: 'Buscar producto por nombre, descripción o SKU...',
+                    border: InputBorder.none,
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                  ),
                 ),
               ),
-            ),
 
-            if (_filtered.isNotEmpty) const SizedBox(height: 10),
+              if (_filtered.isNotEmpty) const SizedBox(height: 10),
 
-            // SUGERENCIAS
-            if (_filtered.isNotEmpty)
-              Container(
-                constraints: const BoxConstraints(maxHeight: 260),
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: _filtered.length,
-                  itemBuilder: (context, i) {
-                    final pdoc = _filtered[i];
-                    final d = pdoc.data() as Map<String, dynamic>;
-                    final name = (d['name'] ?? 'Producto').toString();
-                    // AHORA interpretamos 'price' como precio SIN IVA
-                    final displayPriceNet = _toDouble(d['price']);
-                    final stock = _toInt(d['stock']);
-                    final requiresRx =
-                        (d['requiresPrescription'] ?? false) == true;
-                    final form = (d['pharmForm'] ?? '').toString();
-                    final route = (d['route'] ?? '').toString();
-                    final strength = (d['strength'] ?? '').toString();
-                    final pres = (d['presentation'] ?? '').toString();
+              // SUGERENCIAS
+              if (_filtered.isNotEmpty)
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 260),
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _filtered.length,
+                    itemBuilder: (context, i) {
+                      final pdoc = _filtered[i];
+                      final d = pdoc.data() as Map<String, dynamic>;
+                      final name = (d['name'] ?? 'Producto').toString();
+                      // interpretamos 'price' como precio SIN IVA
+                      final displayPriceNet = _toDouble(d['price']);
+                      final stock = _toInt(d['stock']);
+                      final requiresRx =
+                          (d['requiresPrescription'] ?? false) == true;
+                      final form = (d['pharmForm'] ?? '').toString();
+                      final route = (d['route'] ?? '').toString();
+                      final strength = (d['strength'] ?? '').toString();
+                      final pres = (d['presentation'] ?? '').toString();
 
-                    final inferredDisc = _discountFromData(d);
+                      final inferredDisc = _discountFromData(d);
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8.0),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.green.shade100,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(name,
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8.0),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.shade100,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      name,
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(
-                                          fontWeight: FontWeight.bold)),
-                                  const SizedBox(height: 4),
-                                  Wrap(
-                                    spacing: 10,
-                                    runSpacing: 6,
-                                    children: [
-                                      if (form.isNotEmpty || route.isNotEmpty)
-                                        _pill(
-                                            '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
-                                      if (strength.isNotEmpty)
-                                        _pill('Conc.: $strength'),
-                                      if (pres.isNotEmpty)
-                                        _pill('Pres.: $pres'),
-                                      _pill('Stock: $stock'),
-                                      _pill(
-                                          'Precio (sin IVA): ${_fmt(displayPriceNet)}'),
-                                      if (inferredDisc > 0)
-                                        _pill(
-                                            'Oferta: ${inferredDisc.toStringAsFixed(0)}%'),
-                                    ],
-                                  ),
-                                  if (requiresRx) ...[
-                                    const SizedBox(height: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                          horizontal: 8, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: Colors.red.shade50,
-                                        borderRadius: BorderRadius.circular(8),
-                                        border: Border.all(
-                                            color: Colors.red.shade300),
-                                      ),
-                                      child: const Text(
-                                        'Este producto requiere receta médica.',
-                                        style: TextStyle(
-                                            color: Colors.red,
-                                            fontWeight: FontWeight.w600),
+                                        fontWeight: FontWeight.bold,
                                       ),
                                     ),
+                                    const SizedBox(height: 4),
+                                    Wrap(
+                                      spacing: 10,
+                                      runSpacing: 6,
+                                      children: [
+                                        if (form.isNotEmpty || route.isNotEmpty)
+                                          _pill(
+                                            '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}',
+                                          ),
+                                        if (strength.isNotEmpty)
+                                          _pill('Conc.: $strength'),
+                                        if (pres.isNotEmpty)
+                                          _pill('Pres.: $pres'),
+                                        _pill('Stock: $stock'),
+                                        _pill(
+                                          'Precio (sin IVA): ${_fmt(displayPriceNet)}',
+                                        ),
+                                        if (inferredDisc > 0)
+                                          _pill(
+                                            'Oferta: ${inferredDisc.toStringAsFixed(0)}%',
+                                          ),
+                                      ],
+                                    ),
+                                    if (requiresRx) ...[
+                                      const SizedBox(height: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 6,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.red.shade50,
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: Colors.red.shade300,
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'Este producto requiere receta médica.',
+                                          style: TextStyle(
+                                            color: Colors.red,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ],
-                                ],
+                                ),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Column(
-                            children: [
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  foregroundColor: Colors.white,
+                            const SizedBox(width: 8),
+                            Column(
+                              children: [
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  onPressed: () => _showDetailsDialog(d),
+                                  child: const Text('Detalles'),
                                 ),
-                                onPressed: () => _showDetailsDialog(d),
-                                child: const Text('Detalles'),
-                              ),
-                              const SizedBox(height: 8),
-                              ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.green,
-                                  foregroundColor: Colors.white,
-                                ),
-                                onPressed: stock <= 0
-                                    ? null
-                                    : () async {
-                                        final disc =
-                                            await _bestDiscountFor(pdoc.id, d);
-                                        // finalPrice = precio FINAL con IVA (13%) aplicado a partir del precio sin IVA
-                                        final finalPrice =
-                                            _computeSaleUnitPrice(d, disc);
-                                        _addLine(
-                                          productId: pdoc.id,
-                                          name: name,
-                                          unitPrice: finalPrice,
-                                          stock: stock,
-                                          taxable:
-                                              (d['taxable'] ?? false) == true,
-                                          ivaPercent:
-                                              _toDouble(d['ivaPercent'] ?? 13),
-                                          discountPct: disc,
-                                        );
-                                        searchCtrl.clear();
+                                const SizedBox(height: 8),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.green,
+                                    foregroundColor: Colors.white,
+                                  ),
+                                  onPressed: stock <= 0
+                                      ? null
+                                      : () async {
+                                          final disc =
+                                              await _bestDiscountFor(pdoc.id, d);
 
-                                        if (disc > 0) {
-                                          _showSnack(
-                                              'Se aplicó oferta: ${disc.toStringAsFixed(0)}% sobre $name');
-                                        }
-                                      },
-                                child: const Text('Agregar'),
-                              ),
+                                          final priceWithoutVat =
+                                              _computeSaleUnitPrice(d, disc);
+                                          final ivaPercent =
+                                              _toDouble(d['ivaPercent'] ?? 13);
+                                          final taxable =
+                                              (d['taxable'] ?? false) == true;
+                                          final priceWithVat = taxable
+                                              ? priceWithoutVat *
+                                                  (1 + ivaPercent / 100)
+                                              : priceWithoutVat;
+
+                                          _addLine(
+                                            productId: pdoc.id,
+                                            name: name,
+                                            unitPriceWithoutVat:
+                                                priceWithoutVat,
+                                            unitPriceWithVat: priceWithVat,
+                                            stock: stock,
+                                            taxable: taxable,
+                                            ivaPercent: ivaPercent,
+                                            discountPct: disc,
+                                          );
+                                          searchCtrl.clear();
+
+                                          if (disc > 0) {
+                                            _showSnack(
+                                              'Se aplicó oferta: ${disc.toStringAsFixed(0)}% sobre $name',
+                                            );
+                                          }
+                                        },
+                                  child: const Text('Agregar'),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+              const SizedBox(height: 12),
+
+              LayoutBuilder(
+                builder: (context, cons) {
+                  final isNarrow = cons.maxWidth < 560;
+                  return Column(
+                    children: [
+                      if (!isNarrow)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            vertical: 6,
+                            horizontal: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.grey.shade100,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            children: const [
+                              Expanded(child: Text('Producto')),
+                              SizedBox(width: 100, child: Text('Cant.')),
+                              SizedBox(width: 100, child: Text('Precio')),
+                              SizedBox(width: 120, child: Text('Subtotal')),
+                              SizedBox(width: 40, child: Text('')),
                             ],
                           ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
+                        ),
+                      const SizedBox(height: 8),
 
-            const SizedBox(height: 12),
-
-            // ENCABEZADO (solo en ancho medio/alto)
-            LayoutBuilder(builder: (context, cons) {
-              final isNarrow = cons.maxWidth < 560;
-              return Column(children: [
-                if (!isNarrow)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 6, horizontal: 8),
-                    decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Row(children: const [
-                      Expanded(child: Text('Producto')),
-                      SizedBox(width: 100, child: Text('Cant.')),
-                      SizedBox(width: 100, child: Text('Precio')),
-                      SizedBox(width: 120, child: Text('Subtotal')),
-                      SizedBox(width: 40, child: Text('')),
-                    ]),
-                  ),
-                const SizedBox(height: 8),
-
-                // ÁREA VERDE con las líneas
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.green.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green.shade100),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6.0),
-                    child: _lines.isEmpty
-                        ? const Padding(
-                            padding: EdgeInsets.all(16.0),
-                            child: Center(
-                                child:
-                                    Text('No hay productos agregados.')))
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            physics:
-                                const NeverScrollableScrollPhysics(),
-                            itemCount: _lines.length,
-                            itemBuilder: (context, i) =>
-                                _lineTile(_lines[i], isNarrow),
-                          ),
-                  ),
-                ),
-              ]);
-            }),
-
-            const SizedBox(height: 12),
-
-            // L / C / I  (acciones rápidas)
-            Wrap(
-              spacing: 10,
-              runSpacing: 8,
-              children: [
-                ElevatedButton(
-                  onPressed: _lines.isEmpty &&
-                          buyerCtrl.text.isEmpty &&
-                          notesCtrl.text.isEmpty
-                      ? null
-                      : _clearAll,
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white),
-                  child: const Text('L  •  Limpiar'),
-                ),
-                ElevatedButton(
-                  onPressed: null, // reservado para "C"
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black12,
-                      foregroundColor: Colors.black54),
-                  child: const Text('C  •  Próximamente'),
-                ),
-                ElevatedButton(
-                  onPressed:
-                      _lines.isEmpty ? null : () => _printCurrentInvoice(),
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white),
-                  child: const Text('I  •  Imprimir PDF'),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 12),
-
-            TextFormField(
-              controller: buyerCtrl,
-              decoration: const InputDecoration(
-                  labelText: 'Cliente o comprador (opcional)'),
-            ),
-            const SizedBox(height: 8),
-            TextFormField(
-              controller: notesCtrl,
-              decoration:
-                  const InputDecoration(labelText: 'Notas adicionales'),
-            ),
-
-            if (_anyRequiresRecipe())
-              Padding(
-                padding: const EdgeInsets.only(top: 10.0),
-                child: Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange.shade300),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                          'Hay productos de venta bajo receta en esta venta.',
-                          style: TextStyle(fontWeight: FontWeight.w600)),
-                      SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        activeColor: kGreen2,
-                        title: const Text('Receta médica verificada'),
-                        value: _recipeChecked,
-                        onChanged: (v) =>
-                            setState(() => _recipeChecked = v),
+                      // ÁREA VERDE con las líneas
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.green.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.green.shade100),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6.0),
+                          child: _lines.isEmpty
+                              ? const Padding(
+                                  padding: EdgeInsets.all(16.0),
+                                  child: Center(
+                                    child: Text('No hay productos agregados.'),
+                                  ),
+                                )
+                              : ListView.builder(
+                                  shrinkWrap: true,
+                                  physics:
+                                      const NeverScrollableScrollPhysics(),
+                                  itemCount: _lines.length,
+                                  itemBuilder: (context, i) =>
+                                      _lineTile(_lines[i], isNarrow),
+                                ),
+                        ),
                       ),
                     ],
-                  ),
-                ),
+                  );
+                },
               ),
 
-            const SizedBox(height: 12),
+              const SizedBox(height: 12),
 
-            // Totales + botón guardar
-            Align(
-              alignment: Alignment.centerRight,
-              child: Wrap(
-                spacing: 16,
-                crossAxisAlignment: WrapCrossAlignment.center,
+              // L / C / I
+              Wrap(
+                spacing: 10,
+                runSpacing: 8,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text('Subtotal (sin IVA): ${_fmt(_subtotalSinIVA)}'),
-                      Text('IVA: ${_fmt(_ivaTotal)}'),
-                      Text('Total: ${_fmt(_total)}',
-                          style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.bold)),
-                    ],
+                  ElevatedButton(
+                    onPressed: _lines.isEmpty &&
+                            buyerCtrl.text.isEmpty &&
+                            notesCtrl.text.isEmpty
+                        ? null
+                        : _clearAll,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('L  •  Limpiar'),
                   ),
                   ElevatedButton(
+                    onPressed: null,
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: kGreen2,
-                        foregroundColor: Colors.white),
-                    onPressed: _loading ? null : _save,
-                    child: _loading
-                        ? const SizedBox(
-                            width: 22,
-                            height: 22,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Text('Registrar venta'),
+                      backgroundColor: Colors.black12,
+                      foregroundColor: Colors.black54,
+                    ),
+                    child: const Text('C  •  Próximamente'),
+                  ),
+                  ElevatedButton(
+                    onPressed:
+                        _lines.isEmpty ? null : () => _printCurrentInvoice(),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('I  •  Imprimir PDF'),
                   ),
                 ],
               ),
-            ),
-          ]),
+
+              const SizedBox(height: 12),
+
+              TextFormField(
+                controller: buyerCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Cliente o comprador (opcional)',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: notesCtrl,
+                decoration:
+                    const InputDecoration(labelText: 'Notas adicionales'),
+              ),
+
+              if (_anyRequiresRecipe())
+                Padding(
+                  padding: const EdgeInsets.only(top: 10.0),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.orange.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Hay productos de venta bajo receta en esta venta.',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        SwitchListTile(
+                          contentPadding: EdgeInsets.zero,
+                          activeColor: kGreen2,
+                          title: const Text('Receta médica verificada'),
+                          value: _recipeChecked,
+                          onChanged: (v) =>
+                              setState(() => _recipeChecked = v),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+              const SizedBox(height: 12),
+
+              // Totales + botón guardar
+              Align(
+                alignment: Alignment.centerRight,
+                child: Wrap(
+                  spacing: 16,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                            'Subtotal (sin IVA): ${_fmt(_subtotalSinIVA)}'),
+                        Text('IVA: ${_fmt(_ivaTotal)}'),
+                        Text(
+                          'Total: ${_fmt(_total)}',
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: kGreen2,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: _loading ? null : _save,
+                      child: _loading
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Registrar venta'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
 
-    // Si ya estamos dentro de un Scaffold/Material del dashboard, devolvemos el contenido tal cual.
     if (hasMaterialAncestor && hasScaffoldAncestor) {
       return content;
     }
 
-    // Si NO hay ancestro Material/Scaffold (p. ej. abriste la ruta directa desde el carrusel),
-    // devolvemos el mismo contenido envuelto en Material + Scaffold para que TextField y demás funcionen.
     return Material(
       child: Scaffold(
         appBar: AppBar(
           backgroundColor: kGreen2,
           title: const Text('Generar venta (Egreso)'),
-          leading:
-              Navigator.canPop(context) ? null : const SizedBox.shrink(),
+          leading: Navigator.canPop(context)
+              ? null
+              : const SizedBox.shrink(),
         ),
         body: SafeArea(child: content),
       ),
@@ -895,11 +943,10 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
   // ====== Item responsivo ======
   Widget _lineTile(SaleLine l, bool isNarrow) {
     if (!isNarrow) {
-      // Diseño horizontal (escritorio / tablet)
+      // Diseño horizontal
       return Card(
         margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         child: Padding(
           padding: const EdgeInsets.all(10),
           child: Row(
@@ -907,7 +954,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
             children: [
               Expanded(
                 child: Text(
-                  '${l.name}  (Stock: ${l.stock}, ${_fmt(l.unitPrice)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''})',
+                  '${l.name}  (Stock: ${l.stock}, ${_fmt(l.unitPriceWithVat)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''})',
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -920,10 +967,15 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                     isExpanded: true,
                     value: l.qty,
                     items: List<int>.generate(
-                            (l.stock > 50 ? 50 : (l.stock == 0 ? 1 : l.stock)),
-                            (x) => x + 1)
-                        .map((v) =>
-                            DropdownMenuItem(value: v, child: Text('$v')))
+                      (l.stock > 50 ? 50 : (l.stock == 0 ? 1 : l.stock)),
+                      (x) => x + 1,
+                    )
+                        .map(
+                          (v) => DropdownMenuItem(
+                            value: v,
+                            child: Text('$v'),
+                          ),
+                        )
                         .toList(),
                     onChanged: (v) {
                       if (v == null) return;
@@ -933,9 +985,9 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                 ),
               ),
               const SizedBox(width: 8),
-              SizedBox(width: 100, child: Text(_fmt(l.unitPrice))), // ya con IVA
+              SizedBox(width: 100, child: Text(_fmt(l.unitPriceWithVat))),
               const SizedBox(width: 8),
-              SizedBox(width: 120, child: Text(_fmt(l.subtotal))), // ya con IVA
+              SizedBox(width: 120, child: Text(_fmt(l.subtotal))),
               IconButton(
                 tooltip: 'Quitar',
                 onPressed: () => _removeLine(_lines.indexOf(l)),
@@ -947,67 +999,74 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
       );
     }
 
-    // Diseño compacto (móvil)
+    // Diseño compacto
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                l.name,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Expanded(
-                      child: Text(
-                          'Stock: ${l.stock}  •  ${_fmt(l.unitPrice)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''}')),
-                  IconButton(
-                    tooltip: 'Quitar',
-                    onPressed: () =>
-                        _removeLine(_lines.indexOf(l)),
-                    icon: const Icon(Icons.delete_outline),
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              l.name,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Stock: ${l.stock}  •  ${_fmt(l.unitPriceWithVat)}${l.discountPercent > 0 ? ' • -${l.discountPercent.toStringAsFixed(0)}%' : ''}',
                   ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  SizedBox(
-                    width: 80,
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<int>(
-                        isExpanded: true,
-                        value: l.qty,
-                        items: List<int>.generate(
-                                (l.stock > 50
-                                    ? 50
-                                    : (l.stock == 0 ? 1 : l.stock)),
-                                (x) => x + 1)
-                            .map((v) => DropdownMenuItem(
-                                value: v, child: Text('$v')))
-                            .toList(),
-                        onChanged: (v) {
-                          if (v == null) return;
-                          setState(() => l.qty = v);
-                        },
-                      ),
+                ),
+                IconButton(
+                  tooltip: 'Quitar',
+                  onPressed: () => _removeLine(_lines.indexOf(l)),
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                SizedBox(
+                  width: 80,
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int>(
+                      isExpanded: true,
+                      value: l.qty,
+                      items: List<int>.generate(
+                        (l.stock > 50 ? 50 : (l.stock == 0 ? 1 : l.stock)),
+                        (x) => x + 1,
+                      )
+                          .map(
+                            (v) => DropdownMenuItem(
+                              value: v,
+                              child: Text('$v'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setState(() => l.qty = v);
+                      },
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                      child: Text('Subtotal: ${_fmt(l.subtotal)}',
-                          textAlign: TextAlign.right)),
-                ],
-              ),
-            ]),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Subtotal: ${_fmt(l.subtotal)}',
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1036,8 +1095,10 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _kv('Forma/Vía',
-                '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}'),
+            _kv(
+              'Forma/Vía',
+              '${form.isEmpty ? '—' : form} / ${route.isEmpty ? '—' : route}',
+            ),
             _kv('Concentración', strength.isEmpty ? '—' : strength),
             _kv('Presentación', pres.isEmpty ? '—' : pres),
             _kv('Stock', '$stock'),
@@ -1048,8 +1109,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
               _kv('Oferta', '${inferredDisc.toStringAsFixed(0)}%'),
             if (expiry != null &&
                 expiry.difference(DateTime.now()).inDays <= 90)
-              _kv('Observación',
-                  'Producto próximo a vencer — oferta aplicada'),
+              _kv('Observación', 'Producto próximo a vencer — oferta aplicada'),
             if (requiresRx)
               Padding(
                 padding: const EdgeInsets.only(top: 8.0),
@@ -1058,8 +1118,11 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                     Icon(Icons.warning_amber, color: Colors.red),
                     SizedBox(width: 6),
                     Expanded(
-                        child: Text('Producto bajo receta médica',
-                            style: TextStyle(color: Colors.red))),
+                      child: Text(
+                        'Producto bajo receta médica',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1067,8 +1130,9 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(c),
-              child: const Text('Cerrar')),
+            onPressed: () => Navigator.pop(c),
+            child: const Text('Cerrar'),
+          ),
         ],
       ),
     );
@@ -1079,25 +1143,31 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
         child: Row(
           children: [
             SizedBox(
-                width: 140,
-                child:
-                    Text(k, style: const TextStyle(fontWeight: FontWeight.w600))),
+              width: 140,
+              child: Text(
+                k,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
             Expanded(child: Text(v)),
           ],
         ),
       );
 
   Widget _pill(String t) => Container(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(color: Colors.green.shade300),
           borderRadius: BorderRadius.circular(999),
         ),
-        child: Text(t,
-            style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w600)),
+        child: Text(
+          t,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       );
 }
 

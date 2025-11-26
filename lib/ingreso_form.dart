@@ -268,6 +268,11 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     );
     final unitsCtrl =
         TextEditingController(text: '${baseProduct?['unitsPerPack'] ?? 1}');
+    final descriptionCtrl = TextEditingController(
+      text: (baseProduct?['description'] ?? '').toString(),
+    );
+    final newCategoryCtrl = TextEditingController();
+
     String pharmForm = (baseProduct?['pharmForm'] ?? '').toString();
     String route = (baseProduct?['route'] ?? '').toString();
     String strength = (baseProduct?['strength'] ?? '').toString();
@@ -282,6 +287,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
         (baseProduct?['category'] ?? '').toString().isNotEmpty
             ? baseProduct!['category']
             : null;
+    bool isOtherCategory = false;
 
     final formKey = GlobalKey<FormState>();
 
@@ -329,20 +335,61 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                         ),
                         labeled(
                           DropdownButtonFormField<String>(
-                            value: category,
+                            value: isOtherCategory ? '_other' : category,
                             decoration:
                                 const InputDecoration(labelText: 'Categoría *'),
-                            items: _categories
-                                .map((e) => DropdownMenuItem(
+                            items: [
+                              ..._categories
+                                  .map(
+                                    (e) => DropdownMenuItem(
                                       value: e,
                                       child: Text(e),
-                                    ))
-                                .toList(),
-                            onChanged: (v) => setLocal(() => category = v),
-                            validator: (v) =>
-                                (v == null || v.trim().isEmpty)
+                                    ),
+                                  )
+                                  .toList(),
+                              const DropdownMenuItem(
+                                value: '_other',
+                                child: Text('Otra categoría...'),
+                              ),
+                            ],
+                            onChanged: (v) => setLocal(() {
+                              if (v == '_other') {
+                                isOtherCategory = true;
+                              } else {
+                                isOtherCategory = false;
+                                category = v;
+                              }
+                            }),
+                            validator: (_) {
+                              if (!isOtherCategory) {
+                                return (category == null ||
+                                        category!.trim().isEmpty)
                                     ? 'Requerido'
-                                    : null,
+                                    : null;
+                              } else {
+                                return newCategoryCtrl.text.trim().isEmpty
+                                    ? 'Ingrese la categoría'
+                                    : null;
+                              }
+                            },
+                          ),
+                        ),
+                        if (isOtherCategory)
+                          labeled(
+                            TextFormField(
+                              controller: newCategoryCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Nueva categoría *',
+                              ),
+                            ),
+                          ),
+                        labeled(
+                          TextFormField(
+                            controller: descriptionCtrl,
+                            maxLines: 2,
+                            decoration: const InputDecoration(
+                              labelText: 'Descripción (opcional)',
+                            ),
                           ),
                         ),
                         labeled(
@@ -577,10 +624,17 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                   ),
                   onPressed: () async {
                     if (!formKey.currentState!.validate()) return;
+
+                    final categoryToSave = isOtherCategory
+                        ? newCategoryCtrl.text.trim()
+                        : (category ?? '').trim();
+
                     final payload = {
                       'name': nameCtrl.text.trim(),
                       'sku': skuCtrl.text.trim(),
-                      'category': category,
+                      'category':
+                          categoryToSave.isEmpty ? null : categoryToSave,
+                      'description': descriptionCtrl.text.trim(),
                       'purchasePrice': double.tryParse(
                               purchaseCtrl.text.replaceAll(',', '.')) ??
                           0.0,
@@ -749,7 +803,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                 _toDouble(l.purchasePrice.toStringAsFixed(2)),
             'salePrice': _toDouble(l.salePrice.toStringAsFixed(2)),
             'subtotal': _toDouble(l.subtotal.toStringAsFixed(2)),
-            'lot': l.lot.trim().isEmpty ? null : l.lot.trim(),
+            'lot': l.lot.trim().isNotEmpty ? l.lot.trim() : null,
             'manufactureDate': l.manufactureDate != null
                 ? Timestamp.fromDate(l.manufactureDate!)
                 : null,
@@ -822,7 +876,11 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
       });
 
       _showSnack('Compra registrada y stock actualizado.');
-      if (mounted) Navigator.pop(context);
+      // 🔴 ANTES: if (mounted) Navigator.pop(context);
+      // ✅ AHORA: solo limpiamos el formulario, sin salir del dashboard
+      if (mounted) {
+        _clearAll();
+      }
     } catch (e) {
       _showSnack('Error al registrar compra: $e');
     } finally {
@@ -964,6 +1022,10 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                                     (d['strength'] ?? '').toString();
                                 final pres =
                                     (d['presentation'] ?? '').toString();
+                                final category =
+                                    (d['category'] ?? '').toString();
+                                final desc =
+                                    (d['description'] ?? '').toString();
 
                                 return Padding(
                                   padding:
@@ -995,6 +1057,38 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
                                                     fontWeight:
                                                         FontWeight.bold),
                                               ),
+                                              if (category.isNotEmpty)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 2.0),
+                                                  child: Text(
+                                                    category,
+                                                    style:
+                                                        const TextStyle(
+                                                      fontSize: 11,
+                                                      fontStyle:
+                                                          FontStyle.italic,
+                                                    ),
+                                                  ),
+                                                ),
+                                              if (desc.isNotEmpty)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                          top: 2.0),
+                                                  child: Text(
+                                                    desc,
+                                                    maxLines: 2,
+                                                    overflow:
+                                                        TextOverflow
+                                                            .ellipsis,
+                                                    style:
+                                                        const TextStyle(
+                                                      fontSize: 11,
+                                                    ),
+                                                  ),
+                                                ),
                                               const SizedBox(height: 4),
                                               Wrap(
                                                 spacing: 10,
@@ -1060,7 +1154,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
 
                         const SizedBox(height: 12),
 
-                        // Acciones sobre líneas (Wrap para evitar overflow)
+                        // Acciones sobre líneas
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
@@ -1132,43 +1226,63 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
 
                         const SizedBox(height: 12),
 
-                        Row(
-                          children: [
-                            Expanded(
-                              child:
-                                  DropdownButtonFormField<String>(
-                                value: _providers != null &&
-                                        _providers!.isNotEmpty
-                                    ? _providers!.first.id
-                                    : null,
-                                items: _providers
-                                    ?.map((p) {
-                                      final d = p.data()
-                                          as Map<String, dynamic>;
-                                      return DropdownMenuItem(
-                                        value: p.id,
-                                        child: Text(d['name'] ?? '—'),
-                                      );
-                                    })
-                                    .toList(),
-                                onChanged: (v) =>
-                                    providerCtrl.text = v ?? '',
-                                decoration: const InputDecoration(
-                                  labelText: 'Proveedor',
-                                ),
+                        // Proveedor + factura -> RESPONSIVO
+                        LayoutBuilder(
+                          builder: (context, constraints) {
+                            final isNarrowSection =
+                                constraints.maxWidth < 480;
+
+                            final providerField =
+                                DropdownButtonFormField<String>(
+                              value: _providers != null &&
+                                      _providers!.isNotEmpty
+                                  ? _providers!.first.id
+                                  : null,
+                              items: _providers
+                                  ?.map((p) {
+                                    final d = p.data()
+                                        as Map<String, dynamic>;
+                                    return DropdownMenuItem(
+                                      value: p.id,
+                                      child: Text(d['name'] ?? '—'),
+                                    );
+                                  })
+                                  .toList(),
+                              onChanged: (v) =>
+                                  providerCtrl.text = v ?? '',
+                              decoration: const InputDecoration(
+                                labelText: 'Proveedor',
                               ),
-                            ),
-                            const SizedBox(width: 12),
-                            SizedBox(
-                              width: 220,
-                              child: TextFormField(
-                                controller: invoiceCtrl,
-                                decoration: const InputDecoration(
-                                  labelText: 'N° factura / serie',
-                                ),
+                            );
+
+                            final invoiceField = TextFormField(
+                              controller: invoiceCtrl,
+                              decoration: const InputDecoration(
+                                labelText: 'N° factura / serie',
                               ),
-                            ),
-                          ],
+                            );
+
+                            if (isNarrowSection) {
+                              return Column(
+                                children: [
+                                  providerField,
+                                  const SizedBox(height: 8),
+                                  invoiceField,
+                                ],
+                              );
+                            } else {
+                              return Row(
+                                children: [
+                                  Expanded(child: providerField),
+                                  const SizedBox(width: 12),
+                                  SizedBox(
+                                    width: 260,
+                                    child: invoiceField,
+                                  ),
+                                ],
+                              );
+                            }
+                          },
                         ),
                         const SizedBox(height: 8),
                         Row(
@@ -1292,7 +1406,7 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
 
     final productSelector = DropdownButtonFormField<String>(
       value: ln.productId,
-      isExpanded: true, // ⬅️ importante para evitar overflow
+      isExpanded: true,
       items: (_products ?? []).map((p) {
         final d = p.data() as Map<String, dynamic>;
         final stock = _toInt(d['stock']);
@@ -1583,6 +1697,9 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
     final pres = (d['presentation'] ?? '').toString();
     final requiresRx =
         (d['requiresPrescription'] ?? false) == true;
+    final category = (d['category'] ?? '').toString();
+    final description = (d['description'] ?? '').toString();
+    final unitsPerPack = _toInt(d['unitsPerPack']);
 
     await showDialog(
       context: context,
@@ -1594,6 +1711,11 @@ class _IngresoFormWidgetState extends State<IngresoFormWidget> {
           children: [
             _kv('SKU', (d['sku'] ?? '—').toString()),
             _kv('Stock', '$stock'),
+            if (unitsPerPack > 0)
+              _kv('Unidades/emp.', '$unitsPerPack'),
+            if (category.isNotEmpty) _kv('Categoría', category),
+            if (description.isNotEmpty)
+              _kv('Descripción', description),
             _kv('Precio compra', '\$${purchase.toStringAsFixed(2)}'),
             _kv('Precio venta', '\$${price.toStringAsFixed(2)}'),
             _kv('IVA', taxable ? '${iva.toStringAsFixed(0)}%' : 'No grava'),

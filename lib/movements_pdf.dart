@@ -201,7 +201,7 @@ class MovementsPdf {
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.stretch,
             children: [
-              // Encabezado del movimiento (sin iconitos raros)
+              // Encabezado del movimiento
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -209,7 +209,7 @@ class MovementsPdf {
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.start,
                     children: [
-                      // Usuario + etiqueta de tipo en la misma línea
+                      // Usuario + etiqueta de tipo
                       pw.Row(
                         mainAxisSize: pw.MainAxisSize.min,
                         children: [
@@ -252,7 +252,7 @@ class MovementsPdf {
                           style: const pw.TextStyle(fontSize: 10),
                         ),
                       if (counterparty.isNotEmpty) ...[
-                        pw.SizedBox(height: 3), // espacio extra antes de "Cliente"
+                        pw.SizedBox(height: 3),
                         pw.Text(
                           type == 'egreso'
                               ? 'Cliente: $counterparty'
@@ -290,7 +290,7 @@ class MovementsPdf {
 
               pw.SizedBox(height: 8),
 
-              // Tabla de líneas con diseño similar a la factura
+              // Tabla de líneas
               _itemsTable(items),
             ],
           ),
@@ -338,11 +338,16 @@ class MovementsPdf {
           padding: const pw.EdgeInsets.symmetric(vertical: 6, horizontal: 8),
           child: pw.Row(
             children: [
-              _cellHeader('Producto', flex: 30, style: headerStyle),
-              _cellHeader('Cant.', flex: 8, style: headerStyle, align: pw.TextAlign.center),
-              _cellHeader('P. unidad', flex: 13, style: headerStyle, align: pw.TextAlign.right),
-              _cellHeader('Subtotal', flex: 13, style: headerStyle, align: pw.TextAlign.right),
-              _cellHeader('Stock', flex: 16, style: headerStyle, align: pw.TextAlign.right),
+              _cellHeader('Producto',
+                  flex: 30, style: headerStyle, align: pw.TextAlign.left),
+              _cellHeader('Cant.',
+                  flex: 8, style: headerStyle, align: pw.TextAlign.center),
+              _cellHeader('P. unidad',
+                  flex: 13, style: headerStyle, align: pw.TextAlign.right),
+              _cellHeader('Subtotal',
+                  flex: 13, style: headerStyle, align: pw.TextAlign.right),
+              _cellHeader('Stock',
+                  flex: 16, style: headerStyle, align: pw.TextAlign.right),
             ],
           ),
         ),
@@ -355,16 +360,24 @@ class MovementsPdf {
       final zebra = i % 2 == 1 ? PdfColor.fromHex('#FAFAFA') : PdfColors.white;
 
       final qty = _toInt(it['qty']);
+
+      // ⬇️ AQUÍ EL CAMBIO IMPORTANTE
+      // Primero intentamos leer unitPriceWithVat (precio con IVA),
+      // luego otros posibles campos para no quedarnos en 0.00.
       final unitPrice = _toMoney(
-        it['unitPrice'] ?? it['purchasePrice'] ?? it['salePrice'],
+        it['unitPriceWithVat'] ??
+            it['unitPrice'] ??
+            it['unitPriceWithoutVat'] ??
+            it['salePrice'] ??
+            it['purchasePrice'],
       );
+
       final subtotal = _toMoney(it['subtotal']);
 
       final stockBefore = it['stockBefore'];
       final stockAfter = it['stockAfter'];
       String stockText = '';
       if (stockBefore is num && stockAfter is num) {
-        // sin flecha, texto claro
         stockText =
             'Antes: ${_toInt(stockBefore)} / Después: ${_toInt(stockAfter)}';
       }
@@ -388,8 +401,13 @@ class MovementsPdf {
                 _cell(
                   '${it['productName']} (SKU: ${it['sku']})',
                   flex: 30,
+                  align: pw.TextAlign.left,
                 ),
-                _cell('$qty', flex: 8, align: pw.TextAlign.center),
+                _cell(
+                  '$qty',
+                  flex: 8,
+                  align: pw.TextAlign.center,
+                ),
                 _cell(
                   _fmtMoney(unitPrice),
                   flex: 13,
@@ -480,7 +498,6 @@ class MovementsPdf {
     if (from != null) {
       return 'Desde ${_fmtDate(from)}';
     }
-    // solo to != null
     return 'Hasta ${_fmtDate(to!)}';
   }
 
