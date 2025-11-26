@@ -810,14 +810,7 @@ class _EgresoFormWidgetState extends State<EgresoFormWidget> {
                     ),
                     child: const Text('L  •  Limpiar'),
                   ),
-                  ElevatedButton(
-                    onPressed: null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black12,
-                      foregroundColor: Colors.black54,
-                    ),
-                    child: const Text('C  •  Próximamente'),
-                  ),
+                
                   ElevatedButton(
                     onPressed:
                         _lines.isEmpty ? null : () => _printCurrentInvoice(),

@@ -690,6 +690,8 @@ class _MovementsManagerState extends State<MovementsManager> {
                     Text(
                       '${dt.day}/${dt.month}/${dt.year} '
                       '${dt.hour.toString().padLeft(2, '0')}:'
+
+
                       '${dt.minute.toString().padLeft(2, '0')}',
                     ),
                   Text(
@@ -809,6 +811,8 @@ class _MovementsManagerState extends State<MovementsManager> {
                     ? '—'
                     : '${dt.day}/${dt.month}/${dt.year} '
                         '${dt.hour.toString().padLeft(2, '0')}:'
+
+
                         '${dt.minute.toString().padLeft(2, '0')}',
               ),
             ),
@@ -1072,19 +1076,23 @@ class _IvaRetenidoDialogState extends State<_IvaRetenidoDialog> {
               const SizedBox(height: 8),
               _buildTable(widget.pendientes, allowMarkPaid: true),
               const SizedBox(height: 4),
+
+              // *** CAMBIO IMPORTANTE: Row -> Wrap para evitar overflow ***
               Align(
                 alignment: Alignment.centerRight,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 12,
+                  runSpacing: 4,
                   children: [
                     Text(
                       'Total IVA retenido pendiente: ${_totalIvaPendiente().toStringAsFixed(2)}',
-                      style:
-                          Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodyMedium
+                          ?.copyWith(fontWeight: FontWeight.bold),
                     ),
-                    const SizedBox(width: 12),
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _grupoPendientePagado
